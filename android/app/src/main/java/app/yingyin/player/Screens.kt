@@ -136,13 +136,12 @@ fun HomeScreen(
     onMe: () -> Unit,
     onOpen: (Item) -> Unit
 ) {
-    var list by remember { mutableStateOf<List<Item>>(emptyList()) }
+    val list = Repo.homeItems
     var loading by remember { mutableStateOf(true) }
 
     LaunchedEffect(Unit) {
-        list = Repo.cachedHome()
-        loading = list.isEmpty()
-        list = Repo.home()
+        loading = Repo.homeItems.isEmpty()
+        Repo.home()
         loading = false
     }
 

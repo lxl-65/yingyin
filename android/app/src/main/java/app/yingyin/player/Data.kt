@@ -42,16 +42,20 @@ fun looksMedia(url: String): Boolean {
     return u.contains(".m3u8") || u.contains(".mp4") || u.contains(".flv") || u.contains(".mkv")
 }
 
-/** 内置种子源：取自放映厅 2026-11-22 19:46 体检中 play_ok=true 的 8 个站 */
+/** 内置种子源：与 docs/sub.json 同步（2026-11-22 复测 30s 超时，12 个可用站） */
 val SEED: List<Source> = listOf(
-    Source("hn2", "红牛资源", "https://www.hongniuzy2.com/api.php/provide/vod"),
-    Source("iqy", "爱奇艺资源", "https://iqiyizyapi.com/api.php/provide/vod"),
+    Source("maoyan", "猫眼资源", "https://api.maoyanapi.top/api.php/provide/vod"),
     Source("360", "360资源", "https://360zy.com/api.php/provide/vod"),
-    Source("ffzy", "非凡资源", "https://api.ffzyapi.com/api.php/provide/vod"),
+    Source("iqy", "爱奇艺资源", "https://iqiyizyapi.com/api.php/provide/vod"),
+    Source("hn3", "红牛3", "https://www.hongniuzy3.com/api.php/provide/vod"),
+    Source("hn2", "红牛资源", "https://www.hongniuzy2.com/api.php/provide/vod"),
     Source("qlys", "千里资源", "https://www.qlys.cc/api.php/provide/vod"),
-    Source("hhzy", "豪华资源", "https://haohuazy.com/api.php/provide/vod"),
+    Source("ffzy", "非凡资源", "https://api.ffzyapi.com/api.php/provide/vod"),
     Source("ffzy5", "非凡5", "http://ffzy5.tv/api.php/provide/vod"),
-    Source("hn3", "红牛3", "https://www.hongniuzy3.com/api.php/provide/vod")
+    Source("gs", "光速资源", "http://api.guangsuapi.com/api.php/provide/vod"),
+    Source("zdy", "最大资源", "http://zuidazy.me/api.php/provide/vod"),
+    Source("hhzy", "豪华资源", "https://hhzyapi.com/api.php/provide/vod"),
+    Source("sub", "速播资源", "https://subocj.com/api.php/provide/vod")
 )
 
 private const val UA =
@@ -145,14 +149,19 @@ object Cms {
 
 object Repo {
     private val http: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(5, TimeUnit.SECONDS)
-        .readTimeout(8, TimeUnit.SECONDS)
+        .connectTimeout(8, TimeUnit.SECONDS)
+        .readTimeout(22, TimeUnit.SECONDS)
+        .callTimeout(26, TimeUnit.SECONDS)
         .build()
 
     var sources by androidx.compose.runtime.mutableStateOf(SEED)
         private set
 
-    var subState by androidx.compose.runtime.mutableStateOf("内置源 · 8 个")
+    var subState by androidx.compose.runtime.mutableStateOf("内置源 · 12 个")
+        private set
+    var homeItems by androidx.compose.runtime.mutableStateOf<List<Item>>(emptyList())
+        private set
+    var homeLoading by androidx.compose.runtime.mutableStateOf(false)
         private set
     var update by androidx.compose.runtime.mutableStateOf<UpdateInfo?>(null)
         private set
@@ -259,13 +268,25 @@ object Repo {
 
     suspend fun home(t: String = ""): List<Item> = coroutineScope {
         if (t.isBlank() && homeCache.isNotEmpty() && System.currentTimeMillis() - homeCacheAt < 10 * 60_000L) {
+            homeItems = homeCache
             return@coroutineScope homeCache
         }
         val src = sources
-        val parts = src.map { s ->
-            async(Dispatchers.IO) { Cms.parseList(text(Cms.url(s.api, t = t)), s.key) }
+        val acc = java.util.Collections.synchronizedList(mutableListOf<Item>())
+        homeLoading = true
+        val jobs = src.map { s ->
+            async(Dispatchers.IO) {
+                val part = Cms.parseList(text(Cms.url(s.api, t = t)) ?: "", s.key)
+                if (part.isNotEmpty()) {
+                    acc.addAll(part)
+                    homeItems = merge(acc.toList())   // 有多少先显示多少
+                }
+            }
         }
-        val merged = merge(parts.awaitAll().flatten())
+        jobs.awaitAll()
+        homeLoading = false
+        val merged = merge(acc.toList())
+        homeItems = merged
         if (t.isBlank() && merged.isNotEmpty()) {
             homeCache = merged
             homeCacheAt = System.currentTimeMillis()

@@ -1,7 +1,7 @@
 {
-  "versionCode": 2,
-  "versionName": "0.1.1",
+  "versionCode": 3,
+  "versionName": "0.1.2",
   "updated": "2026-11-22",
   "apk": "https://github.com/lxl-65/yingyin/releases/latest",
-  "notes": "远程订阅：源的增删改只需改 sub.json，App 启动自动同步；多地址回退（Pages / jsDelivr / raw）"
+  "notes": "源从 8 个扩到 12 个（30 秒耐心复测挑出来的）；首页边拉边显示，慢源不再拖住首屏"
 }

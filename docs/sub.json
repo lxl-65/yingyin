@@ -1,47 +1,79 @@
 {
-  "version": 1,
-  "updated": "2026-11-22 21:02",
-  "note": "放映厅订阅源：由 health_v2 体检结果生成，只保留列表/详情/播放都通的源",
-  "sources": [
-    {
-      "key": "hongniuzy2",
-      "name": "hongniuzy2.com",
-      "api": "https://www.hongniuzy2.com/api.php/provide/vod"
-    },
-    {
-      "key": "iqiyizyapi",
-      "name": "iqiyizyapi.com",
-      "api": "https://iqiyizyapi.com/api.php/provide/vod"
-    },
-    {
-      "key": "360zy",
-      "name": "360zy.com",
-      "api": "https://360zy.com/api.php/provide/vod"
-    },
-    {
-      "key": "api",
-      "name": "api.ffzyapi.com",
-      "api": "https://api.ffzyapi.com/api.php/provide/vod"
-    },
-    {
-      "key": "qlys",
-      "name": "qlys.cc",
-      "api": "https://www.qlys.cc/api.php/provide/vod"
-    },
-    {
-      "key": "haohuazy",
-      "name": "haohuazy.com",
-      "api": "https://haohuazy.com/api.php/provide/vod"
-    },
-    {
-      "key": "ffzy5",
-      "name": "ffzy5.tv",
-      "api": "http://ffzy5.tv/api.php/provide/vod"
-    },
-    {
-      "key": "hongniuzy3",
-      "name": "hongniuzy3.com",
-      "api": "https://www.hongniuzy3.com/api.php/provide/vod"
-    }
-  ]
+ "version": 2,
+ "updated": "2026-11-22",
+ "note": "全部通过 list+detail+play 体检（30s 超时，2026-11-22 复测）",
+ "sources": [
+  {
+   "key": "maoyan",
+   "name": "猫眼资源",
+   "api": "https://api.maoyanapi.top/api.php/provide/vod",
+   "ms": 738
+  },
+  {
+   "key": "360",
+   "name": "360资源",
+   "api": "https://360zy.com/api.php/provide/vod",
+   "ms": 1282
+  },
+  {
+   "key": "iqy",
+   "name": "爱奇艺资源",
+   "api": "https://iqiyizyapi.com/api.php/provide/vod",
+   "ms": 1509
+  },
+  {
+   "key": "hn3",
+   "name": "红牛3",
+   "api": "https://www.hongniuzy3.com/api.php/provide/vod",
+   "ms": 1645
+  },
+  {
+   "key": "hn2",
+   "name": "红牛资源",
+   "api": "https://www.hongniuzy2.com/api.php/provide/vod",
+   "ms": 1706
+  },
+  {
+   "key": "qlys",
+   "name": "千里资源",
+   "api": "https://www.qlys.cc/api.php/provide/vod",
+   "ms": 1734
+  },
+  {
+   "key": "ffzy",
+   "name": "非凡资源",
+   "api": "https://api.ffzyapi.com/api.php/provide/vod",
+   "ms": 2508
+  },
+  {
+   "key": "ffzy5",
+   "name": "非凡5",
+   "api": "http://ffzy5.tv/api.php/provide/vod",
+   "ms": 2727
+  },
+  {
+   "key": "gs",
+   "name": "光速资源",
+   "api": "http://api.guangsuapi.com/api.php/provide/vod",
+   "ms": 3569
+  },
+  {
+   "key": "zdy",
+   "name": "最大资源",
+   "api": "http://zuidazy.me/api.php/provide/vod",
+   "ms": 4655
+  },
+  {
+   "key": "hhzy",
+   "name": "豪华资源",
+   "api": "https://hhzyapi.com/api.php/provide/vod",
+   "ms": 10247
+  },
+  {
+   "key": "sub",
+   "name": "速播资源",
+   "api": "https://subocj.com/api.php/provide/vod",
+   "ms": 19915
+  }
+ ]
 }
