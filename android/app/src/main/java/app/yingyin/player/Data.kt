@@ -1,6 +1,9 @@
 package app.yingyin.player
 
 import android.content.Context
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -31,6 +34,8 @@ data class Item(
 data class Episode(val name: String, val url: String)
 data class Line(val from: String, val eps: List<Episode>)
 data class Detail(val item: Item, val lines: List<Line>, val desc: String, val actors: String = "")
+
+data class UpdateInfo(val versionCode: Int, val versionName: String, val apk: String, val notes: String)
 
 fun looksMedia(url: String): Boolean {
     val u = url.lowercase()
@@ -144,10 +149,12 @@ object Repo {
         .readTimeout(8, TimeUnit.SECONDS)
         .build()
 
-    var sources: List<Source> = SEED
+    var sources by androidx.compose.runtime.mutableStateOf(SEED)
         private set
 
-    var subState: String = "内置源 · 8 个"
+    var subState by androidx.compose.runtime.mutableStateOf("内置源 · 8 个")
+        private set
+    var update by androidx.compose.runtime.mutableStateOf<UpdateInfo?>(null)
         private set
     private var homeCache: List<Item> = emptyList()
     private var homeCacheAt: Long = 0L
@@ -222,11 +229,32 @@ object Repo {
             if (list.isNotEmpty()) {
                 sources = list
                 subState = "远程订阅 · ${list.size} 个源"
+                homeCacheAt = 0L   // 源变了，首页缓存作废
                 return@withContext true
             }
         }
         subState = "内置源 · ${sources.size} 个（订阅不可达）"
         false
+    }
+
+    suspend fun checkUpdate(urls: List<String>): UpdateInfo? = withContext(Dispatchers.IO) {
+        for (u in urls) {
+            val raw = text(u) ?: continue
+            try {
+                val j = JSONObject(raw)
+                val vc = j.optInt("versionCode", 0)
+                if (vc > BuildConfig.VERSION_CODE) {
+                    val info = UpdateInfo(
+                        vc, j.optString("versionName"), j.optString("apk"), j.optString("notes")
+                    )
+                    update = info
+                    return@withContext info
+                }
+                return@withContext null
+            } catch (e: Exception) {
+            }
+        }
+        null
     }
 
     suspend fun home(t: String = ""): List<Item> = coroutineScope {

@@ -6,6 +6,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -30,6 +31,11 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun App() {
+    LaunchedEffect(Unit) {
+        val subs = BuildConfig.SUB_URLS.split(",").map { it.trim() }.filter { it.isNotBlank() }
+        if (subs.isNotEmpty()) Repo.sync(subs)
+        Repo.checkUpdate(BuildConfig.VERSION_URL.split(",").map { it.trim() }.filter { it.isNotBlank() })
+    }
     YingyinTheme {
         val cfg = LocalConfiguration.current
         val isTv = (cfg.uiMode and Configuration.UI_MODE_TYPE_MASK) ==

@@ -18,9 +18,17 @@ android {
         applicationId = "app.yingyin.player"
         minSdk = 21
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0"
-        buildConfigField("String", "SUB_URLS", "\"\"")
+        versionCode = 2
+        versionName = "0.1.1"
+        // 订阅地址按顺序回退：GitHub Pages → jsDelivr 镜像 → raw.githubusercontent
+        buildConfigField(
+            "String", "SUB_URLS",
+            "\"https://lxl-65.github.io/yingyin/sub.json,https://cdn.jsdelivr.net/gh/lxl-65/yingyin@main/docs/sub.json,https://raw.githubusercontent.com/lxl-65/yingyin/main/docs/sub.json\""
+        )
+        buildConfigField(
+            "String", "VERSION_URL",
+            "\"https://lxl-65.github.io/yingyin/version.json,https://cdn.jsdelivr.net/gh/lxl-65/yingyin@main/docs/version.json\""
+        )
     }
 
     signingConfigs {

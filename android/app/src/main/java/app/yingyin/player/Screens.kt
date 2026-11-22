@@ -395,8 +395,9 @@ fun DetailScreen(item: Item, onBack: () -> Unit, onPlay: (String, List<Line>, In
 
 @Composable
 fun MeScreen(onBack: () -> Unit) {
-    var state by remember { mutableStateOf(Repo.subState) }
-    var sources by remember { mutableStateOf(Repo.sources) }
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val state = Repo.subState
+    val sources = Repo.sources
     var busy by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val subUrls = remember {
@@ -408,6 +409,36 @@ fun MeScreen(onBack: () -> Unit) {
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 14.dp)) {
             Text("订阅", color = TextMain, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
             Text(state, color = TextSub, fontSize = 12.sp, modifier = Modifier.padding(top = 5.dp))
+            Repo.update?.let { up ->
+                Column(
+                    Modifier
+                        .padding(top = 12.dp)
+                        .fillMaxWidth()
+                        .background(CardBg, RoundedCornerShape(12.dp))
+                        .padding(14.dp)
+                ) {
+                    Text("发现新版本 ${up.versionName}", color = Accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    if (up.notes.isNotBlank()) {
+                        Text(up.notes, color = TextSub, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
+                    }
+                    Box(
+                        Modifier
+                            .padding(top = 10.dp)
+                            .background(Accent, RoundedCornerShape(9.dp))
+                            .clickable {
+                                try {
+                                    ctx.startActivity(
+                                        android.content.Intent(
+                                            android.content.Intent.ACTION_VIEW,
+                                            android.net.Uri.parse(up.apk)
+                                        ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    )
+                                } catch (e: Exception) { }
+                            }
+                            .padding(horizontal = 16.dp, vertical = 8.dp)
+                    ) { Text("去下载", color = Color.White, fontSize = 12.sp) }
+                }
+            }
             if (subUrls.isEmpty()) {
                 Text(
                     "当前为内置源，未配置订阅地址。\n改 BuildConfig.SUB_URLS 即可远程更新源。",
@@ -424,8 +455,6 @@ fun MeScreen(onBack: () -> Unit) {
                                 busy = true
                                 scope.launch {
                                     Repo.sync(subUrls)
-                                    state = Repo.subState
-                                    sources = Repo.sources
                                     busy = false
                                 }
                             }
@@ -447,7 +476,7 @@ fun MeScreen(onBack: () -> Unit) {
                 }
             }
             Text(
-                "放映厅 Android 0.1 · 直连源站",
+                "放映厅 Android ${BuildConfig.VERSION_NAME} · 直连源站",
                 color = TextSub, fontSize = 11.sp, modifier = Modifier.padding(top = 22.dp, bottom = 24.dp)
             )
         }

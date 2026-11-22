@@ -1,7 +1,7 @@
 {
-  "versionCode": 1,
-  "versionName": "0.1.0",
+  "versionCode": 2,
+  "versionName": "0.1.1",
   "updated": "2026-11-22",
   "apk": "https://github.com/lxl-65/yingyin/releases/latest",
-  "notes": "首个可用版本：8 源聚合、搜索、详情、播放自动换线路、本地缓存"
+  "notes": "远程订阅：源的增删改只需改 sub.json，App 启动自动同步；多地址回退（Pages / jsDelivr / raw）"
 }
