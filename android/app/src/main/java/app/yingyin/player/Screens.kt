@@ -146,7 +146,7 @@ fun HomeScreen(
     }
 
     Column(Modifier.fillMaxSize().background(Bg)) {
-        TopBar("放映厅") {
+        TopBar("影视仓") {
             Text(
                 "搜索", color = TextSub, fontSize = 13.sp,
                 modifier = Modifier.clickable(onClick = onSearch).padding(8.dp)
@@ -475,7 +475,7 @@ fun MeScreen(onBack: () -> Unit) {
                 }
             }
             Text(
-                "放映厅 Android ${BuildConfig.VERSION_NAME} · 直连源站",
+                "影视仓 Android ${BuildConfig.VERSION_NAME} · 直连源站",
                 color = TextSub, fontSize = 11.sp, modifier = Modifier.padding(top = 22.dp, bottom = 24.dp)
             )
         }

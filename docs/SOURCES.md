@@ -1,6 +1,9 @@
 # 源清单对照：网页端 21+1 个 → App 端为什么只有 8 个（现已 12 个）
 
-> 数据来源：`C:\AI\demo\yingyin\data\sources.json`（22 条）、`data\health_v2.json`（10 秒体检，2026-11-22 19:46）、`_shots\health30.json`（30 秒复测，2026-11-22 21:0x）
+> 数据来源：`C:\AI\demo\yingyin\data\sources.json`（22 条）、`data/health_v2.json`（10 秒体检，2026-11-22 19:46）、`_shots\health30.json`（30 秒复测，2026-11-22 21:0x）
+>
+> 命名：产品/App 名 **影视仓**，Web 端 **放映厅**，代码仓 `yingyin` / `yingyin-app`。见文档仓 `NAMING.md`。
+> 别名：「小鸡看看」是**第三方**桌面端（也是本机 `xjcms.js` 这个源的名字），不是本产品的旧名，本文保留原叫法。
 
 ## 一、先把数量对上
 

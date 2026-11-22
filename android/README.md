@@ -1,4 +1,7 @@
-# 放映厅 Android
+# 影视仓 App · Android
+
+> 命名：产品/App 名 **影视仓**（App 桌面图标与 App 内标题都是「影视仓」）；Web 端叫 **放映厅**；代码仓 `yingyin-app`。
+> 旧名 / 别名（如「放映厅 App」）见文档仓 `C:\开发项目\影视仓\NAMING.md` 第 2 节，搜索旧名会指回这里。
 
 Kotlin + Jetpack Compose + Media3(ExoPlayer)。一个 APK 同时能装在手机和电视盒子（TV 端 UI 还在做）。
 

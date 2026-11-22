@@ -9,7 +9,7 @@
 
     <application
         android:allowBackup="true"
-        android:label="放映厅"
+        android:label="影视仓"
         android:supportsRtl="true"
         android:usesCleartextTraffic="true"
         android:theme="@style/Theme.Yingyin">

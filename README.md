@@ -1,6 +1,10 @@
-# 放映厅
+# 影视仓（App）
 
 安卓影视聚合播放器：一个 APK，自己维护一份源清单，朋友装上就能用。
+
+> 命名：产品名 **影视仓**，App 名 **影视仓**，Web 端叫 **放映厅**，代码仓 `yingyin-app`。
+> 安卓桌面图标显示的就是「影视仓」（`android:label`）。规范全文见文档仓 `NAMING.md`。
+> 旧名「放映厅」曾用于本 App，现只指 Web 端。
 
 - **手机端**：Kotlin + Jetpack Compose + Media3(ExoPlayer)
 - **订阅**：`docs/sub.json`（GitHub Pages 托管，App 启动自动拉取，失败回退内置源）
