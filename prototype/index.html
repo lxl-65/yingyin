@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>放映厅 App · 界面原型</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0; padding: 18px;
+    background: #1a1b20; color: #e8e9ee;
+    font-family: "Microsoft YaHei UI", "PingFang SC", system-ui, sans-serif;
+    display: flex; gap: 22px; align-items: flex-start;
+  }
+  /* ---------- 手机框 ---------- */
+  .phone {
+    width: 390px; height: 744px; flex: 0 0 auto;
+    border-radius: 34px; overflow: hidden; position: relative;
+    background: #0c0d11;
+    box-shadow: 0 0 0 8px #2a2c33, 0 18px 50px rgba(0,0,0,.55);
+  }
+  .screen { position: absolute; inset: 0; display: none; flex-direction: column; }
+  .screen.on { display: flex; }
+
+  /* ---------- 通用 ---------- */
+  .hd { padding: 16px 16px 10px; display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
+  .hd h1 { font-size: 20px; margin: 0; font-weight: 700; letter-spacing: .5px; }
+  .hd .sub { font-size: 11px; color: #7d818d; margin-top: 2px; }
+  .hd .sp { flex: 1; }
+  .icon {
+    width: 34px; height: 34px; border-radius: 11px; background: #191b22;
+    display: grid; place-items: center; font-size: 15px; color: #b9bcc6;
+  }
+  .body { flex: 1; overflow-y: auto; padding: 0 16px 14px; }
+  .body::-webkit-scrollbar { width: 0; }
+
+  .chips { display: flex; gap: 8px; overflow-x: auto; padding: 4px 16px 12px; flex: 0 0 auto; }
+  .chips::-webkit-scrollbar { height: 0; }
+  .chip {
+    flex: 0 0 auto; padding: 7px 14px; border-radius: 999px;
+    background: #181a21; color: #9aa0ad; font-size: 13px; white-space: nowrap;
+  }
+  .chip.on { background: #ff5d3b; color: #fff; font-weight: 600; }
+
+  .sec { display: flex; align-items: baseline; gap: 8px; margin: 12px 0 10px; }
+  .sec b { font-size: 15px; }
+  .sec span { font-size: 11px; color: #6f7480; }
+
+  .row { display: flex; gap: 11px; overflow-x: auto; padding-bottom: 4px; }
+  .row::-webkit-scrollbar { height: 0; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 11px 9px; }
+
+  .card { cursor: pointer; }
+  .poster {
+    position: relative; aspect-ratio: 2/3; border-radius: 10px; overflow: hidden;
+    background: #171922; display: grid; place-items: center;
+  }
+  .poster .grad { position: absolute; inset: 0; }
+  .poster .ini { font-size: 26px; font-weight: 800; color: rgba(255,255,255,.22); letter-spacing: 2px; }
+  .row .poster { width: 112px; }
+  .ttl { font-size: 12px; margin-top: 6px; line-height: 1.35; color: #d9dbe2; }
+  .meta { font-size: 10.5px; color: #6f7480; margin-top: 2px; }
+  .badge {
+    position: absolute; left: 6px; bottom: 6px; font-size: 10px;
+    padding: 2px 6px; border-radius: 5px; background: rgba(8,9,12,.78);
+    color: #cfd3dc; backdrop-filter: blur(2px);
+  }
+  .badge.hot { color: #ffd7a8; }
+  .score { position: absolute; right: 6px; top: 6px; font-size: 11px; font-weight: 700; color: #ffca57; }
+
+  /* ---------- 首页 hero ---------- */
+  .hero {
+    position: relative; height: 176px; border-radius: 14px; overflow: hidden;
+    margin-bottom: 4px; background: #16181f; cursor: pointer;
+  }
+  .hero .grad { position: absolute; inset: 0; }
+  .hero .txt { position: absolute; left: 14px; bottom: 13px; right: 14px; }
+  .hero .txt h2 { margin: 0 0 4px; font-size: 17px; }
+  .hero .txt p { margin: 0; font-size: 11.5px; color: #b6bac5; }
+  .hero .tag {
+    display: inline-block; font-size: 10px; padding: 2px 7px; border-radius: 5px;
+    background: #ff5d3b; color: #fff; margin-bottom: 6px; font-weight: 600;
+  }
+
+  /* ---------- tabbar ---------- */
+  .tab {
+    flex: 0 0 auto; height: 62px; display: flex; border-top: 1px solid #1d1f27;
+    background: #0f1015; padding-bottom: 4px;
+  }
+  .tab div {
+    flex: 1; display: grid; place-items: center; gap: 2px; font-size: 10.5px;
+    color: #5f6470; cursor: pointer;
+  }
+  .tab div .ic { font-size: 17px; }
+  .tab div.on { color: #ff5d3b; }
+
+  /* ---------- 搜索 ---------- */
+  .searchbar {
+    display: flex; gap: 8px; align-items: center; background: #191b22;
+    border-radius: 12px; padding: 10px 12px; font-size: 13px; color: #6f7480;
+  }
+  .hits { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .hits span { font-size: 12px; padding: 6px 11px; border-radius: 999px; background: #181a21; color: #9aa0ad; }
+  .res { display: flex; gap: 11px; padding: 10px 0; border-bottom: 1px solid #191b22; cursor: pointer; }
+  .res .poster { width: 62px; flex: 0 0 auto; aspect-ratio: 2/3; }
+  .res .poster .ini { font-size: 15px; }
+  .res .info { flex: 1; min-width: 0; }
+  .res .info b { font-size: 14px; font-weight: 600; }
+  .res .info p { margin: 5px 0 0; font-size: 11px; color: #7d818d; line-height: 1.5; }
+  .pill {
+    display: inline-block; font-size: 10px; padding: 2px 6px; border-radius: 4px;
+    background: #1e2129; color: #9aa0ad; margin-right: 5px;
+  }
+  .pill.good { background: rgba(255,93,59,.16); color: #ff9c7f; }
+
+  /* ---------- 详情 ---------- */
+  .dhead { position: relative; height: 250px; flex: 0 0 auto; }
+  .dhead .grad { position: absolute; inset: 0; }
+  .dhead .back {
+    position: absolute; left: 14px; top: 14px; width: 34px; height: 34px; border-radius: 50%;
+    background: rgba(8,9,12,.6); display: grid; place-items: center; cursor: pointer; font-size: 15px;
+  }
+  .dhead .cover {
+    position: absolute; left: 16px; bottom: -34px; width: 92px; aspect-ratio: 2/3;
+    border-radius: 10px; overflow: hidden; background: #171922; box-shadow: 0 8px 22px rgba(0,0,0,.5);
+    display: grid; place-items: center;
+  }
+  .dhead .cover .ini { font-size: 20px; color: rgba(255,255,255,.25); }
+  .dmeta { padding: 40px 16px 0; }
+  .dmeta h2 { margin: 0; font-size: 19px; }
+  .dmeta .line { font-size: 11.5px; color: #8b8f9a; margin-top: 6px; }
+  .dmeta .desc { font-size: 12px; color: #a8adb9; line-height: 1.65; margin-top: 9px; }
+
+  .linetabs { display: flex; gap: 8px; overflow-x: auto; padding: 14px 0 4px; }
+  .linetabs::-webkit-scrollbar { height: 0; }
+  .lt {
+    flex: 0 0 auto; font-size: 12px; padding: 8px 12px; border-radius: 9px;
+    background: #181a21; color: #9aa0ad; border: 1px solid transparent; cursor: pointer;
+  }
+  .lt.on { background: rgba(255,93,59,.14); color: #ff9c7f; border-color: rgba(255,93,59,.4); }
+  .lt em { font-style: normal; font-size: 10px; opacity: .75; margin-left: 4px; }
+
+  .eps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 12px; }
+  .ep {
+    padding: 10px 0; text-align: center; font-size: 12px; border-radius: 9px;
+    background: #171922; color: #b6bac5; cursor: pointer;
+  }
+  .ep.on { background: #ff5d3b; color: #fff; font-weight: 600; }
+
+  /* ---------- 播放 ---------- */
+  #sc-play { background: #000; }
+  .pwrap { flex: 1; position: relative; }
+  .pwrap .grad { position: absolute; inset: 0; opacity: .5; }
+  .pwrap .center {
+    position: absolute; inset: 0; display: grid; place-items: center; font-size: 44px; color: rgba(255,255,255,.9);
+    cursor: pointer;
+  }
+  .pbar {
+    position: absolute; left: 0; right: 0; bottom: 0; padding: 12px 14px 14px;
+    background: linear-gradient(transparent, rgba(0,0,0,.85));
+  }
+  .pbar .track { height: 3px; border-radius: 2px; background: rgba(255,255,255,.22); position: relative; }
+  .pbar .track i { position: absolute; left: 0; top: 0; bottom: 0; width: 34%; background: #ff5d3b; border-radius: 2px; }
+  .pbar .t { display: flex; justify-content: space-between; font-size: 10.5px; color: #cfd3dc; margin-top: 7px; }
+  .pbar .ctl { display: flex; gap: 16px; align-items: center; margin-top: 9px; font-size: 13px; color: #e8e9ee; }
+  .pbar .ctl .q { margin-left: auto; font-size: 11px; padding: 4px 9px; border-radius: 6px; background: rgba(255,93,59,.2); color: #ff9c7f; }
+  .pback { position: absolute; left: 14px; top: 14px; z-index: 2; width: 34px; height: 34px; border-radius: 50%; background: rgba(8,9,12,.55); display: grid; place-items: center; cursor: pointer; }
+
+  /* ---------- 我的 ---------- */
+  .subcard { background: #15171e; border: 1px solid #22242d; border-radius: 14px; padding: 13px 14px; margin-top: 6px; }
+  .subcard .k { font-size: 11px; color: #6f7480; }
+  .subcard .v { font-size: 12.5px; margin-top: 3px; color: #cfd3dc; word-break: break-all; }
+  .health { display: flex; gap: 14px; margin-top: 12px; }
+  .health div { flex: 1; background: #191b22; border-radius: 10px; padding: 10px; }
+  .health b { display: block; font-size: 18px; color: #e8e9ee; }
+  .health span { font-size: 10.5px; color: #6f7480; }
+  .btn {
+    margin-top: 12px; text-align: center; padding: 11px; border-radius: 11px;
+    background: #ff5d3b; color: #fff; font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  .btn.ghost { background: #1b1d25; color: #b6bac5; font-weight: 500; }
+  .rows { margin-top: 16px; border-radius: 14px; overflow: hidden; border: 1px solid #22242d; }
+  .rows div {
+    display: flex; align-items: center; gap: 10px; padding: 13px 14px; font-size: 13px;
+    background: #14161c; border-bottom: 1px solid #1d1f27; color: #cfd3dc;
+  }
+  .rows div:last-child { border-bottom: 0; }
+  .rows div .r { margin-left: auto; font-size: 11.5px; color: #6f7480; }
+  .switch { width: 38px; height: 22px; border-radius: 999px; background: #2a2d37; position: relative; margin-left: auto; transition: .2s; }
+  .switch.on { background: #ff5d3b; }
+  .switch i { position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: .2s; }
+  .switch.on i { left: 19px; }
+
+  /* ---------- 注释列 ---------- */
+  .notes { width: 300px; font-size: 12.5px; line-height: 1.75; color: #9aa0ad; }
+  .notes h3 { font-size: 13px; color: #e8e9ee; margin: 0 0 8px; }
+  .notes ol { padding-left: 18px; margin: 0 0 16px; }
+  .notes li { margin-bottom: 6px; }
+  .notes code { background: #22242d; padding: 1px 5px; border-radius: 4px; color: #ffb59f; font-size: 11.5px; }
+  .notes .hl { color: #e8e9ee; }
+</style>
+</head>
+<body>
+
+<div class="phone">
+  <!-- ========== 首页 ========== -->
+  <div class="screen on" id="sc-home">
+    <div class="hd">
+      <div>
+        <h1>放映厅</h1>
+        <div class="sub" id="homeSub">22 个源 · 8 个在线</div>
+      </div>
+      <div class="sp"></div>
+      <div class="icon" onclick="go('search')">⌕</div>
+      <div class="icon" onclick="go('me')">☰</div>
+    </div>
+    <div class="chips" id="chips"></div>
+    <div class="body">
+      <div class="hero" onclick="openDetail(0)">
+        <div class="grad" style="background:linear-gradient(135deg,#3a1d4e,#12131a 70%)"></div>
+        <div class="txt">
+          <span class="tag">本周最高分 · 9.4</span>
+          <h2>赛博朋克：边缘行者 第二季</h2>
+          <p>2026 · 动画 / 科幻 · 6 个源可播 · 1080P 实测</p>
+        </div>
+      </div>
+      <div class="sec"><b>本周高分</b><span>按实测画质排序</span></div>
+      <div class="row" id="rowHot"></div>
+      <div class="sec"><b>最近更新</b><span>今晚 +38 部</span></div>
+      <div class="grid" id="gridNew"></div>
+    </div>
+    <div class="tab">
+      <div class="on" onclick="go('home')"><span class="ic">▣</span>首页</div>
+      <div onclick="go('search')"><span class="ic">⌕</span>搜索</div>
+      <div onclick="go('me')"><span class="ic">☺</span>我的</div>
+    </div>
+  </div>
+
+  <!-- ========== 搜索 ========== -->
+  <div class="screen" id="sc-search">
+    <div class="hd"><h1>搜索</h1><div class="sp"></div><div class="icon" onclick="go('home')">✕</div></div>
+    <div class="body">
+      <div class="searchbar">⌕ 搜索片名、演员、导演</div>
+      <div class="hits">
+        <span>赛博朋克</span><span>庆余年</span><span>沙丘</span><span>繁花</span><span>咒术回战</span>
+      </div>
+      <div class="sec" style="margin-top:18px"><b>搜索结果</b><span>6 个源命中 · 用时 1.8 秒</span></div>
+      <div id="resList"></div>
+    </div>
+    <div class="tab">
+      <div onclick="go('home')"><span class="ic">▣</span>首页</div>
+      <div class="on" onclick="go('search')"><span class="ic">⌕</span>搜索</div>
+      <div onclick="go('me')"><span class="ic">☺</span>我的</div>
+    </div>
+  </div>
+
+  <!-- ========== 详情 ========== -->
+  <div class="screen" id="sc-detail">
+    <div class="body" style="padding:0">
+      <div class="dhead">
+        <div class="grad" id="dGrad" style="background:linear-gradient(135deg,#3a1d4e,#0c0d11 72%)"></div>
+        <div class="back" onclick="go('home')">‹</div>
+        <div class="cover"><span class="ini" id="dIni">赛</span></div>
+      </div>
+      <div class="dmeta">
+        <h2 id="dTitle">赛博朋克：边缘行者 第二季</h2>
+        <div class="line" id="dLine">2026 · 动画 / 科幻 · 9.4 分 · 12 集全</div>
+        <div class="desc" id="dDesc">
+          夜之城的霓虹下，新的边缘行者接过旧梦。这一季把镜头推向义体医生与他的病人们——每一个被修补过的身体，都欠着一段旧账。
+        </div>
+        <div class="linetabs" id="lineTabs"></div>
+        <div class="eps" id="epBox"></div>
+        <div style="height:8px"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== 播放 ========== -->
+  <div class="screen" id="sc-play">
+    <div class="pwrap">
+      <div class="grad" style="background:linear-gradient(140deg,#241033,#05060a 65%)"></div>
+      <div class="pback" onclick="go('detail')">‹</div>
+      <div class="center" id="pCenter" onclick="togglePlay()">⏸</div>
+      <div class="pbar">
+        <div class="track"><i id="pProg"></i></div>
+        <div class="t"><span id="pNow">08:12</span><span>23:56</span></div>
+        <div class="ctl">
+          <span onclick="togglePlay()" id="pBtn">⏸</span>
+          <span>−10s</span><span>+10s</span>
+          <span>CC</span>
+          <span class="q" id="pQ">1080P · 直连</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== 我的 ========== -->
+  <div class="screen" id="sc-me">
+    <div class="hd"><h1>我的</h1></div>
+    <div class="body">
+      <div class="subcard">
+        <div class="k">订阅地址</div>
+        <div class="v">https://sub.yingyin.app/v1/pub.json?k=••••••</div>
+        <div class="k" style="margin-top:10px">上次同步</div>
+        <div class="v" id="syncAt">2 分钟前 · 自动</div>
+        <div class="health">
+          <div><b id="hTotal">22</b><span>源总数</span></div>
+          <div><b id="hAlive">8</b><span>可播放</span></div>
+          <div><b>240s</b><span>体检耗时</span></div>
+        </div>
+        <div class="btn" id="btnSync" onclick="syncNow()">立即检查更新</div>
+      </div>
+      <div class="rows">
+        <div>★ 收藏 <span class="r">12</span></div>
+        <div>◷ 观看历史 <span class="r">34</span></div>
+        <div>⇣ 缓存与画质 <span class="r">自动 1080P</span></div>
+        <div>代理兜底 <span class="switch on" onclick="this.classList.toggle('on')"><i></i></span></div>
+        <div>只显示实测可播的源 <span class="switch on" onclick="this.classList.toggle('on')"><i></i></span></div>
+        <div>关于放映厅 <span class="r">v0.1 原型</span></div>
+      </div>
+      <div style="height:10px"></div>
+    </div>
+    <div class="tab">
+      <div onclick="go('home')"><span class="ic">▣</span>首页</div>
+      <div onclick="go('search')"><span class="ic">⌕</span>搜索</div>
+      <div class="on" onclick="go('me')"><span class="ic">☺</span>我的</div>
+    </div>
+  </div>
+</div>
+
+<div class="notes">
+  <h3>这是「壳 + 远程订阅」的界面原型</h3>
+  <ol>
+    <li><span class="hl">首页</span>：分类胶囊、本周高分（按<code>实测画质</code>排序）、最近更新</li>
+    <li><span class="hl">搜索</span>：一次并发打所有源，结果带来源数与画质徽标</li>
+    <li><span class="hl">详情</span>：线路标签分「直连 1080P / 直连 720P / 代理兜底」，一条挂了换一条</li>
+    <li><span class="hl">播放</span>：右上角标"直连"还是"代理"，出事一眼看出是谁的问题</li>
+    <li><span class="hl">我的</span>：订阅地址 + 源健康 + 手动同步——<code>点"立即检查更新"看效果</code></li>
+  </ol>
+  <h3>点哪里</h3>
+  <ol>
+    <li>点海报 → 详情页</li>
+    <li>点任意一集 → 播放页</li>
+    <li>底部三个 tab 可切换</li>
+    <li>「我的」里点<em>立即检查更新</em>，演示远程订阅怎么换源</li>
+  </ol>
+  <h3>注意</h3>
+  <ol>
+    <li>这里没有真视频，只验证<em>流程和信息层次</em></li>
+    <li>片名是占位，真实数据来自放映厅</li>
+  </ol>
+</div>
+
+<script>
+const DATA = [
+  { t:'赛博朋克：边缘行者', y:2026, k:'动画', s:9.4, src:6, q:'1080P', c:'#3a1d4e,#12131a' },
+  { t:'沙丘：第三部',       y:2026, k:'科幻', s:9.1, src:5, q:'4K',    c:'#4a3320,#12131a' },
+  { t:'繁花',              y:2025, k:'剧集', s:8.9, src:4, q:'1080P', c:'#1f3348,#12131a' },
+  { t:'三体 II',           y:2026, k:'科幻', s:8.8, src:7, q:'1080P', c:'#12303a,#12131a' },
+  { t:'咒术回战 第三季',    y:2026, k:'动画', s:8.7, src:5, q:'1080P', c:'#3c1a1a,#12131a' },
+  { t:'流浪地球 3',        y:2026, k:'电影', s:8.6, src:6, q:'4K',    c:'#1b2a44,#12131a' },
+  { t:'庆余年 第三季',      y:2026, k:'剧集', s:8.5, src:5, q:'1080P', c:'#2c2416,#12131a' },
+  { t:'鬼灭之刃 无限城',    y:2026, k:'动画', s:8.4, src:4, q:'1080P', c:'#301a2c,#12131a' },
+  { t:'绝命毒师 重制',      y:2025, k:'剧集', s:8.3, src:3, q:'720P',  c:'#1d2a1a,#12131a' }
+];
+const CATS = ['全部','电影','剧集','动漫','综艺','纪录片','短剧'];
+
+function grad(c){ return 'linear-gradient(150deg,' + c + ')'; }
+function card(it, i, cls){
+  return '<div class="card ' + (cls||'') + '" onclick="openDetail(' + i + ')">'
+    + '<div class="poster"><div class="grad" style="background:' + grad(it.c) + '"></div>'
+    + '<span class="ini">' + it.t[0] + '</span>'
+    + '<span class="score">' + it.s + '</span>'
+    + '<span class="badge">' + it.src + ' 源 · ' + it.q + '</span></div>'
+    + '<div class="ttl">' + it.t + '</div>'
+    + '<div class="meta">' + it.y + ' · ' + it.k + '</div></div>';
+}
+
+document.getElementById('chips').innerHTML = CATS.map((c,i) =>
+  '<div class="chip' + (i===0?' on':'') + '" onclick="pickChip(this)">' + c + '</div>').join('');
+
+document.getElementById('rowHot').innerHTML = DATA.slice(0,6).map((it,i) => card(it,i)).join('');
+document.getElementById('gridNew').innerHTML = DATA.slice(6).map((it,i) => card(it,i+6)).join('');
+
+document.getElementById('resList').innerHTML = DATA.slice(0,4).map((it,i) =>
+  '<div class="res" onclick="openDetail(' + i + ')">'
+  + '<div class="poster"><div class="grad" style="background:' + grad(it.c) + '"></div><span class="ini">' + it.t[0] + '</span></div>'
+  + '<div class="info"><b>' + it.t + '</b>'
+  + '<p><span class="pill good">' + it.q + ' 实测</span><span class="pill">' + it.src + ' 个源</span><span class="pill">' + it.k + '</span></p>'
+  + '<p>' + it.y + ' · 评分 ' + it.s + ' · 直连优先，防盗链自动走代理</p>'
+  + '</div></div>').join('');
+
+let cur = 0;
+const LINES = [
+  { n:'线路1', q:'直连 · 1080P 实测', eps:12 },
+  { n:'线路2', q:'直连 · 720P', eps:12 },
+  { n:'线路3', q:'代理兜底 · 1080P', eps:12 }
+];
+let curLine = 0, curEp = 0;
+
+function openDetail(i){
+  cur = i;
+  const it = DATA[i];
+  document.getElementById('dTitle').textContent = it.t;
+  document.getElementById('dIni').textContent = it.t[0];
+  document.getElementById('dGrad').style.background = grad(it.c);
+  document.getElementById('dLine').textContent = it.y + ' · ' + it.k + ' · ' + it.s + ' 分 · ' + it.src + ' 个源可用';
+  renderLines();
+  go('detail');
+}
+
+function renderLines(){
+  document.getElementById('lineTabs').innerHTML = LINES.map((l,i) =>
+    '<div class="lt' + (i===curLine?' on':'') + '" onclick="curLine=' + i + ';renderLines()">'
+    + l.n + '<em>' + l.q + '</em></div>').join('');
+  const n = LINES[curLine].eps;
+  let h = '';
+  for (let i = 1; i <= n; i++) h += '<div class="ep' + (i-1===curEp?' on':'') + '" onclick="playEp(' + (i-1) + ')">第' + String(i).padStart(2,'0') + '集</div>';
+  document.getElementById('epBox').innerHTML = h;
+}
+
+function playEp(i){
+  curEp = i;
+  const l = LINES[curLine];
+  document.getElementById('pQ').textContent = (l.q.indexOf('1080') >= 0 ? '1080P' : '720P') + (l.q.indexOf('代理') >= 0 ? ' · 代理' : ' · 直连');
+  go('play');
+}
+
+function go(name){
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('on'));
+  document.getElementById('sc-' + name).classList.add('on');
+  if (name === 'detail') renderLines();
+}
+
+function pickChip(el){
+  document.querySelectorAll('#chips .chip').forEach(c => c.classList.remove('on'));
+  el.classList.add('on');
+}
+
+let playing = true;
+function togglePlay(){
+  playing = !playing;
+  document.getElementById('pCenter').textContent = playing ? '⏸' : '▶';
+  document.getElementById('pBtn').textContent = playing ? '⏸' : '▶';
+}
+
+/* 演示：远程订阅更新 —— 改的是服务器上的 JSON，客户端不用重装 */
+function syncNow(){
+  const b = document.getElementById('btnSync');
+  b.textContent = '正在检查…';
+  setTimeout(() => {
+    document.getElementById('hTotal').textContent = '21';
+    document.getElementById('hAlive').textContent = '9';
+    document.getElementById('syncAt').textContent = '刚刚 · 自动';
+    document.getElementById('homeSub').textContent = '21 个源 · 9 个在线';
+    b.textContent = '已是最新 · 剔除 1 个失效源';
+  }, 1200);
+}
+</script>
+</body>
+</html>

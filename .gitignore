@@ -1,0 +1,22 @@
+# Android 构建产物
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.idea/
+android/captures/
+android/*.iml
+
+# 签名（绝对不要提交）
+android/keystore.properties
+android/*.jks
+android/*.keystore
+
+# 本地产物
+dist/
+_shots/
+*.log
+
+# 系统
+.DS_Store
+Thumbs.db
