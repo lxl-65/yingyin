@@ -18,8 +18,8 @@ android {
         applicationId = "app.yingyin.player"
         minSdk = 21
         targetSdk = 34
-        versionCode = 3
-        versionName = "0.1.2"
+        versionCode = 8
+        versionName = "0.3.3"
         // 订阅地址按顺序回退：GitHub Pages → jsDelivr 镜像 → raw.githubusercontent
         buildConfigField(
             "String", "SUB_URLS",

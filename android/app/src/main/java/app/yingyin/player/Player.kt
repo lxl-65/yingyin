@@ -45,14 +45,22 @@ private fun Context.activityOrNull(): Activity? {
 
 @OptIn(UnstableApi::class)
 @Composable
-fun PlayerScreen(title: String, lines: List<Line>, epIdx: Int, onBack: () -> Unit) {
+fun PlayerScreen(
+    title: String,
+    lines: List<Line>,
+    epIdx: Int,
+    onBack: () -> Unit,
+    onProgress: (Long, Long) -> Unit = { _, _ -> }
+) {
     val ctx = LocalContext.current
     val view = LocalView.current
     val exo = remember { ExoPlayer.Builder(ctx).build() }
 
-    // 同一条剧集在不同线路里的候选地址：优先 m3u8/mp4 直链，播放失败自动换下一条
+    // 同一条剧集在不同线路里的候选地址：优先没被体检判坏的，再优先 m3u8/mp4 直链。
     val candidates = remember(lines, epIdx) {
-        lines.mapNotNull { l -> l.eps.getOrNull(epIdx) ?: l.eps.firstOrNull() }
+        val pool = lines.filter { !it.bad }.ifEmpty { lines }
+        // 不要用“第 1 集”替换缺失的第 N 集，否则自动切线会播错集。
+        pool.mapNotNull { l -> l.eps.getOrNull(epIdx) }
             .distinctBy { it.url }
             .sortedByDescending { looksMedia(it.url) }
     }
@@ -60,6 +68,8 @@ fun PlayerScreen(title: String, lines: List<Line>, epIdx: Int, onBack: () -> Uni
     var stateText by remember { mutableStateOf("准备中") }
     var errText by remember { mutableStateOf<String?>(null) }
     var switching by remember { mutableStateOf(false) }
+    var bufferSince by remember { mutableStateOf(0L) }
+    var lastProgressAt by remember { mutableStateOf(0L) }
 
     DisposableEffect(Unit) {
         val act = ctx.activityOrNull()
@@ -75,7 +85,13 @@ fun PlayerScreen(title: String, lines: List<Line>, epIdx: Int, onBack: () -> Uni
 
     LaunchedEffect(ci) {
         errText = null
-        val c = candidates.getOrNull(ci) ?: return@LaunchedEffect
+        bufferSince = 0L
+        val c = candidates.getOrNull(ci)
+        if (c == null) {
+            errText = "没有可播放的集数"
+            return@LaunchedEffect
+        }
+        exo.stop()
         exo.setMediaItem(MediaItem.fromUri(c.url))
         exo.prepare()
         exo.playWhenReady = true
@@ -92,14 +108,42 @@ fun PlayerScreen(title: String, lines: List<Line>, epIdx: Int, onBack: () -> Uni
                 else -> "?"
             }
             val err = exo.playerError
+            // 真正开始播放后每 5 秒回报一次，历史里的进度条和续播才有意义。
+            if (exo.isPlaying && exo.duration > 0) {
+                val now = System.currentTimeMillis()
+                if (now - lastProgressAt > 5_000L) {
+                    onProgress(exo.currentPosition, exo.duration)
+                    lastProgressAt = now
+                }
+            }
             if (err != null && !switching) {
                 if (ci < candidates.lastIndex) {
                     switching = true
+                    bufferSince = 0L
                     ci += 1
                     delay(1200)
                     switching = false
                 } else {
                     errText = "${err.errorCodeName} · ${err.message}"
+                }
+            } else if (err == null && !switching) {
+                // 有些源不报错，只是一直 0 秒缓冲；8 秒还不走就换下一条，不能让用户干等。
+                if (exo.playbackState == Player.STATE_BUFFERING && exo.currentPosition == 0L) {
+                    val now = System.currentTimeMillis()
+                    if (bufferSince == 0L) bufferSince = now
+                    else if (now - bufferSince > 8_000L) {
+                        if (ci < candidates.lastIndex) {
+                            switching = true
+                            bufferSince = 0L
+                            ci += 1
+                            delay(800)
+                            switching = false
+                        } else {
+                            errText = "所有线路都没有响应"
+                        }
+                    }
+                } else {
+                    bufferSince = 0L
                 }
             }
             delay(600)

@@ -1,7 +1,7 @@
 {
-  "versionCode": 3,
-  "versionName": "0.1.2",
-  "updated": "2026-11-22",
+  "versionCode": 8,
+  "versionName": "0.3.3",
+  "updated": "2026-11-27",
   "apk": "https://github.com/lxl-65/yingyin/releases/latest",
-  "notes": "源从 8 个扩到 12 个（30 秒耐心复测挑出来的）；首页边拉边显示，慢源不再拖住首屏"
+  "notes": "全新应用图标：深墨黑底、橙色电影画框、奶白播放三角，适配圆形、单色图标与电视 banner；启动时自动检测新版本并弹窗提示，可直接跳转下载；同步 GitHub 最新代码与下载页。"
 }

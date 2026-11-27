@@ -5,13 +5,17 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>影视仓 · 下载</title>
 <style>
-  :root{--bg:#0c0d11;--card:#16181f;--txt:#e8e9ee;--sub:#8b8f9a;--accent:#ff5d3b}
+  :root{--bg:#0c0d11;--card:#16181f;--txt:#e8e9ee;--sub:#8b8f9a;--accent:#ff6b3d}
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--txt);font:16px/1.6 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
        display:flex;min-height:100vh;align-items:center;justify-content:center;padding:24px}
   .wrap{max-width:520px;width:100%}
+  .hero{display:flex;align-items:center;gap:14px;margin-bottom:6px}
+  .hero img{width:58px;height:58px;border-radius:15px;box-shadow:0 8px 24px rgba(255,107,61,.22)}
   h1{font-size:28px;margin:0 0 6px}
+  .hero h1{margin:0}
   .sub{color:var(--sub);margin:0 0 24px;font-size:14px}
+  .hero .sub{margin:3px 0 0}
   .card{background:var(--card);border-radius:16px;padding:20px;margin-bottom:16px}
   .btn{display:block;text-align:center;background:var(--accent);color:#fff;text-decoration:none;
        padding:14px;border-radius:12px;font-weight:600;margin-bottom:12px}
@@ -26,8 +30,14 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>影视仓</h1>
-  <p class="sub">影视聚合播放器 · Android（App 名：影视仓｜Web 端叫放映厅）</p>
+  <div class="hero">
+    <img src="icon.png" alt="影视仓图标">
+    <div>
+      <h1>影视仓</h1>
+      <p class="sub">影视聚合播放器 · Android｜<span id="ver">最新版</span></p>
+    </div>
+  </div>
+  <p class="sub">App 名：影视仓｜Web 端叫放映厅</p>
 
   <div class="card">
     <a class="btn" id="dl" href="https://github.com/lxl-65/yingyin/releases/latest">下载最新版 APK</a>
@@ -36,6 +46,7 @@
       <li>点上面的按钮下载 APK（微信里打不开，请用浏览器打开本页）</li>
       <li>安装时选择「允许安装未知来源应用」</li>
       <li>打开即用，源会自动更新，不用手动配置</li>
+      <li>已装旧版可直接覆盖安装，收藏和观看记录会保留</li>
     </ol>
   </div>
 
@@ -46,5 +57,14 @@
 
   <p class="meta">本应用仅聚合公开接口，不存储、不传播任何影视内容。<br>订阅源：<code>/sub.json</code> · 版本信息：<code>/version.json</code></p>
 </div>
+<script>
+fetch('version.json', {cache: 'no-store'})
+  .then(function (r) { return r.json() })
+  .then(function (v) {
+    var el = document.getElementById('ver')
+    if (el && v.versionName) el.textContent = '最新版 ' + v.versionName
+  })
+  .catch(function () {})
+</script>
 </body>
 </html>

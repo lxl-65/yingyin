@@ -1,40 +1,36 @@
-# 影视仓（App）
+# 影视仓 App
 
-安卓影视聚合播放器：一个 APK，自己维护一份源清单，朋友装上就能用。
+Android 端影视聚合播放器，包名 `app.yingyin.player`。
 
-> 命名：产品名 **影视仓**，App 名 **影视仓**，Web 端叫 **放映厅**，代码仓 `yingyin-app`。
-> 安卓桌面图标显示的就是「影视仓」（`android:label`）。规范全文见文档仓 `NAMING.md`。
-> 旧名「放映厅」曾用于本 App，现只指 Web 端。
+## 运行方式
 
-- **手机端**：Kotlin + Jetpack Compose + Media3(ExoPlayer)
-- **订阅**：`docs/sub.json`（GitHub Pages 托管，App 启动自动拉取，失败回退内置源）
-- **分发**：GitHub Releases 放 APK，`docs/index.html` 是下载页
+- **独立模式（默认）**：手机直接访问 21 个采集源，首页、分类、搜索、详情、播放都不需要家里电脑。
+- **家庭增强模式（可选）**：如果手机和 PC 在同一个 Wi-Fi，App 启动时会用 1.5 秒探测 PC 的 `http://192.168.5.2:8899`。探测成功才使用 PC 的精选片单、分类和小鸡 4K 线路；失败自动完全走本地，不拖慢。
+- 朋友手机没有 PC、IP 变化、PC 关机，都走独立模式。
+
+## 关键行为
+
+- 搜索：21 个源并发，单源最多 3.6 秒，先回来的先显示；同一关键词缓存 10 分钟；新搜索会取消旧搜索。
+- 分类：按 `docs/sub.json` 的 `map` 抓每个源真实子分类，最多同时抓 3 个子类；筛选支持类型/地区/年份。
+- 详情：同一部片的多源同时展开，合并线路；每条线路探测第一集，健康的按延迟排前面。
+- 播放：跳过体检坏线；缓冲 8 秒仍为 0 秒自动换下一条。
+- 私密：默认关闭，首页/分类/搜索/详情都不显示；设置里手动打开才出现。
 
 ## 构建
 
 ```bash
-export JAVA_HOME='C:\Tools\jdk-21'
-export ANDROID_HOME='C:\Tools\android-sdk'
-C:/Tools/gradle-8.7/bin/gradle.bat assembleRelease
+cd android
+JAVA_HOME='C:/Tools/jdk-21' ANDROID_HOME='C:/Tools/android-sdk' \
+  C:/Tools/gradle-8.7/bin/gradle.bat assembleRelease --console=plain
 ```
 
-签名配置在 `android/keystore.properties`（不入库），见 `android/README.md`。
+APK：`android/app/build/outputs/apk/release/app-release.apk`
 
-## 订阅格式
+## 发版检查
 
-```json
-{
-  "version": 1,
-  "updated": "2026-11-22 21:00",
-  "sources": [
-    {"key": "hongniuzy2", "name": "hongniuzy2.com", "api": "https://www.hongniuzy2.com/api.php/provide/vod"}
-  ]
-}
+```bash
+node tools/qa/standalone_sources.mjs
+python tools/qa/phone_smoke.py
 ```
 
-接口按苹果 CMS V10 规范：`?ac=videolist&pg=1`、`?ac=videolist&wd=关键词`、`?ac=detail&ids=ID`。
-
-## 说明
-
-- 线路排序：多数 CMS 每个源有两条线路，第一条是网页播放页，第二条才是 m3u8；客户端按直链占比排序并自动换源。
-- 仅聚合公开接口，不存储、不传播影视内容。
+详见 `docs/SOURCES.md`。
