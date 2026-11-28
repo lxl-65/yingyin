@@ -15,6 +15,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -67,6 +68,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.foundation.Canvas
 import androidx.compose.ui.geometry.Offset
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import java.net.URLEncoder
@@ -159,13 +161,21 @@ sealed interface AppRouteV2 {
     data object Categories : AppRouteV2
     data object Search : AppRouteV2
     data object Me : AppRouteV2
+    data object Sources : AppRouteV2
     data class Category(val key: String, val title: String) : AppRouteV2
-    data class Detail(val item: Item, val resumeEp: Int = 0) : AppRouteV2
+    data class Detail(
+        val item: Item,
+        val resumeEp: Int = 0,
+        val resumeLine: String = "",
+        val resumePositionMs: Long = 0L,
+        val autoPlay: Boolean = false
+    ) : AppRouteV2
     data class Play(
         val item: Item,
         val title: String,
         val lines: List<Line>,
-        val epIdx: Int
+        val epIdx: Int,
+        val startMs: Long = 0L
     ) : AppRouteV2
 }
 
@@ -187,7 +197,7 @@ fun YingyinAppV2() {
     val route = stack.last()
     val routeKey = when (val r = route) {
         is AppRouteV2.Category -> "category:${r.key}"
-        is AppRouteV2.Detail -> "detail:${r.item.sid}:${r.item.id}"
+        is AppRouteV2.Detail -> "detail:${r.item.sid}:${r.item.id}:${r.resumeEp}:${r.resumeLine}"
         is AppRouteV2.Play -> "play:${r.item.sid}:${r.item.id}"
         else -> route.toString()
     }
@@ -213,7 +223,15 @@ fun YingyinAppV2() {
                 onSearch = { go(AppRouteV2.Search) },
                 onMe = { go(AppRouteV2.Me) },
                 onOpen = { go(AppRouteV2.Detail(it)) },
-                onResume = { item, ep -> go(AppRouteV2.Detail(item, ep)) },
+                onResume = { entry ->
+                    go(AppRouteV2.Detail(
+                        entry.item,
+                        entry.epIdx,
+                        entry.lineName,
+                        entry.positionMs,
+                        autoPlay = true
+                    ))
+                },
                 onCategory = { key, title -> go(AppRouteV2.Category(key, title)) }
             )
 
@@ -229,8 +247,20 @@ fun YingyinAppV2() {
 
             AppRouteV2.Me -> MeScreenV2(
                 onOpen = { go(AppRouteV2.Detail(it)) },
+                onResume = { entry ->
+                    go(AppRouteV2.Detail(
+                        entry.item,
+                        entry.epIdx,
+                        entry.lineName,
+                        entry.positionMs,
+                        autoPlay = true
+                    ))
+                },
+                onSources = { go(AppRouteV2.Sources) },
                 onBack = { back() }
             )
+
+            AppRouteV2.Sources -> SourcesScreenV2(onBack = { back() })
 
             is AppRouteV2.Category -> {
                 var unlocked by remember(r.key) { mutableStateOf(false) }
@@ -249,15 +279,18 @@ fun YingyinAppV2() {
             is AppRouteV2.Detail -> DetailScreenV2(
                 item = r.item,
                 resumeEp = r.resumeEp,
+                resumeLine = r.resumeLine,
+                resumePositionMs = r.resumePositionMs,
+                autoPlay = r.autoPlay,
                 onBack = { back() },
-                onPlay = { lines, idx, line ->
+                onPlay = { lines, idx, line, startMs ->
                     Library.record(
                         r.item,
-                        "线路 ${lines.indexOf(line) + 1}",
+                        line.from,
                         idx,
                         line.eps.getOrNull(idx)?.name ?: "第${idx + 1}集"
                     )
-                    go(AppRouteV2.Play(r.item, r.item.name, lines, idx))
+                    go(AppRouteV2.Play(r.item, r.item.name, lines, idx, startMs))
                 }
             )
 
@@ -265,9 +298,13 @@ fun YingyinAppV2() {
                 title = r.title,
                 lines = r.lines,
                 epIdx = r.epIdx,
+                startMs = r.startMs,
                 onBack = {
                     // 从播放器返回详情时带回当前集，避免详情页又跳回第 1 集。
                     stack = stack.dropLast(2) + AppRouteV2.Detail(r.item, r.epIdx)
+                },
+                onEpChange = { nextEp ->
+                    stack = stack.dropLast(1) + AppRouteV2.Play(r.item, r.title, r.lines, nextEp, 0L)
                 },
                 onProgress = { pos, dur -> Library.updateProgress(r.item, pos, dur) }
             )
@@ -427,8 +464,16 @@ private fun CoverImage(
                 fontWeight = FontWeight.Bold
             )
         }
+        val ctx = LocalContext.current
+        val request = remember(url) {
+            if (url.isNullOrBlank()) null else ImageRequest.Builder(ctx)
+                .data(url)
+                .addHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0 Safari/537.36")
+                .addHeader("Referer", runCatching { val u = java.net.URL(url); "${u.protocol}://${u.host}/" }.getOrDefault(""))
+                .build()
+        }
         AsyncImage(
-            model = url,
+            model = request,
             contentDescription = name,
             contentScale = ContentScale.Crop,
             modifier = Modifier.matchParentSize()
@@ -484,7 +529,8 @@ private fun TopBarV2(onSearch: () -> Unit, onMe: () -> Unit) {
 private fun SectionTitleV2(
     title: String,
     count: Int? = null,
-    onMore: (() -> Unit)? = null
+    onMore: (() -> Unit)? = null,
+    unit: String = "部"
 ) {
     Row(
         Modifier
@@ -495,7 +541,7 @@ private fun SectionTitleV2(
         Text(title, color = TextMain, fontFamily = Serif, fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
         if (count != null && count > 0) {
             Spacer(Modifier.width(7.dp))
-            Text("$count 部", color = TextDim, fontSize = 10.sp, modifier = Modifier.padding(bottom = 2.dp))
+            Text("$count $unit", color = TextDim, fontSize = 10.sp, modifier = Modifier.padding(bottom = 2.dp))
         }
         Spacer(Modifier.weight(1f))
         if (onMore != null) {
@@ -651,7 +697,7 @@ fun HomeScreenV2(
     onSearch: () -> Unit,
     onMe: () -> Unit,
     onOpen: (Item) -> Unit,
-    onResume: (Item, Int) -> Unit,
+    onResume: (WatchEntry) -> Unit,
     onCategory: (String, String) -> Unit
 ) {
     val items = Repo.homeItems.toList()
@@ -713,8 +759,8 @@ fun HomeScreenV2(
         }
 
         if (history != null) {
-            item { SectionTitleV2("继续观看", onMore = { onResume(history.item, history.epIdx) }) }
-            item { ContinueCardV2(history, onOpen = { onResume(history.item, history.epIdx) }) }
+            item { SectionTitleV2("继续观看", onMore = { onResume(history) }) }
+            item { ContinueCardV2(history, onOpen = { onResume(history) }) }
         }
 
         if (sections.isEmpty() && items.isEmpty()) {
@@ -746,81 +792,73 @@ fun HomeScreenV2(
 
 @Composable
 private fun HeroCardV2(item: Item, onOpen: () -> Unit) {
-    Box(
+    Row(
         Modifier
             .padding(horizontal = 20.dp)
             .fillMaxWidth()
-            .height(286.dp)
-            .clip(RoundedCornerShape(24.dp))
-            .background(CardBg)
+            .height(194.dp)
+            .clip(RoundedCornerShape(20.dp))
+            .background(
+                Brush.linearGradient(
+                    listOf(CardBg, Panel)
+                )
+            )
+            .clickable(onClick = onOpen)
+            .padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
+        // 竖版海报保持 2:3，不再把横图拉满整块背景——这是首页显得“廉价”的主因。
         CoverImage(
             url = item.pic,
             name = item.name,
-            modifier = Modifier.fillMaxSize(),
-            fallbackSize = 64
+            modifier = Modifier
+                .width(104.dp)
+                .height(156.dp)
+                .clip(RoundedCornerShape(12.dp)),
+            fallbackSize = 34
         )
-        Box(
+        Column(
             Modifier
-                .matchParentSize()
-                .background(
-                    Brush.verticalGradient(
-                        0f to Color.Black.copy(alpha = 0.05f),
-                        0.42f to Color.Black.copy(alpha = 0.12f),
-                        0.72f to Color.Black.copy(alpha = 0.72f),
-                        1f to Color.Black.copy(alpha = 0.95f)
-                    )
-                )
-        )
-        Column(Modifier.align(Alignment.BottomStart).padding(18.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                BadgeV2("本周精选")
-            }
-            Spacer(Modifier.height(8.dp))
+                .weight(1f)
+                .padding(start = 14.dp),
+            verticalArrangement = Arrangement.Center
+        ) {
+            BadgeV2("本周精选")
+            Spacer(Modifier.height(7.dp))
             Text(
                 item.name,
-                color = Color.White,
+                color = TextMain,
                 fontFamily = Serif,
-                fontSize = 29.sp,
+                fontSize = 21.sp,
                 fontWeight = FontWeight.Bold,
-                maxLines = 2,
+                maxLines = 3,
                 overflow = TextOverflow.Ellipsis,
-                lineHeight = 32.sp
+                lineHeight = 24.sp
             )
             Spacer(Modifier.height(5.dp))
             Text(
                 listOf(item.year, item.type, item.area).filter { it.isNotBlank() }.joinToString("  ·  "),
-                color = Color.White.copy(alpha = 0.72f),
-                fontSize = 10.sp,
+                color = TextSub,
+                fontSize = 9.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            Spacer(Modifier.height(13.dp))
+            Spacer(Modifier.height(10.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Row(
                     Modifier
                         .clip(RoundedCornerShape(50))
                         .background(Accent)
                         .clickable(onClick = onOpen)
-                        .padding(horizontal = 15.dp, vertical = 9.dp),
+                        .padding(horizontal = 12.dp, vertical = 7.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(Icons.Outlined.PlayArrow, null, tint = Color(0xFF1B0B05), modifier = Modifier.size(17.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("立即播放", color = Color(0xFF1B0B05), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                }
-                Spacer(Modifier.width(17.dp))
-                Row(
-                    Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable(onClick = onOpen)
-                        .padding(vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("查看详情", color = Color.White.copy(alpha = 0.86f), fontSize = 11.sp)
+                    Icon(Icons.Outlined.PlayArrow, null, tint = Color(0xFF1B0B05), modifier = Modifier.size(15.dp))
                     Spacer(Modifier.width(3.dp))
-                    Text("↗", color = AccentSoft, fontSize = 15.sp)
+                    Text("立即播放", color = Color(0xFF1B0B05), fontSize = 10.sp, fontWeight = FontWeight.Bold)
                 }
+                Spacer(Modifier.width(13.dp))
+                Text("详情 ↗", color = AccentSoft, fontSize = 10.sp)
             }
         }
     }
@@ -1372,20 +1410,33 @@ fun CategoryScreenServerV2(
     var genre by remember(key) { mutableStateOf("") }
     var area by remember(key) { mutableStateOf("") }
     var year by remember(key) { mutableStateOf("") }
+    var sort by remember(key) { mutableStateOf("new") }
     var facets by remember(key) { mutableStateOf(ServerFacets()) }
     var loadSeq by remember(key) { mutableStateOf(0) }
+    var endReached by remember(key) { mutableStateOf(false) }
+    val gridState = rememberLazyGridState()
     val scope = rememberCoroutineScope()
 
+    fun sortLocal(list: List<Item>): List<Item> = when (sort) {
+        "score" -> list.sortedByDescending { it.score }
+        "score_asc" -> list.sortedBy { it.score }
+        "hot" -> list.sortedByDescending { it.srcs }
+        else -> list
+    }
+
     suspend fun load(p: Int, append: Boolean) {
+        if (append && (loadingMore || loading)) return
         val my = ++loadSeq
         if (append) loadingMore = true else loading = true
+        if (!append) endReached = false
         try {
             val cat = if (key == "all") "home" else key
             val online = ServerApi.probe()
-            val res = if (online) ServerApi.list(cat, p, genre, area, year) else null
+            val res = if (online) ServerApi.list(cat, p, genre, area, year, sort) else null
             if (my != loadSeq) return
             if (res != null) {
-                items = if (append) (items + res.items).distinctBy { norm(it.name) } else res.items
+                items = if (append) groupLanguageVariants(items + res.items) else groupLanguageVariants(res.items)
+                if (res.items.isEmpty() && append) endReached = true
                 alive = res.alive
                 sources = res.sources
                 facets = res.facets
@@ -1398,7 +1449,8 @@ fun CategoryScreenServerV2(
                 val localItems = local.items.ifEmpty {
                     Repo.homeItems.filter { key == "all" || categoryKeyOf(it) == key }
                 }
-                items = if (append) (items + localItems).distinctBy { norm(it.name) } else localItems
+                items = sortLocal(groupLanguageVariants(if (append) items + localItems else localItems))
+                if (localItems.isEmpty() && append) endReached = true
                 alive = if (local.alive > 0) local.alive else Repo.sources.size
                 sources = if (local.sources > 0) local.sources else Repo.sources.size
                 facets = if (local.facets.genres.isNotEmpty() || local.facets.areas.isNotEmpty() || local.facets.years.isNotEmpty()) {
@@ -1420,6 +1472,16 @@ fun CategoryScreenServerV2(
     }
 
     LaunchedEffect(key) { load(1, false) }
+
+    // 滑到距底部约 8 张时自动续拉，不把“加载更多”当成用户的活儿。
+    LaunchedEffect(gridState, page, loading, loadingMore, endReached, items.size) {
+        snapshotFlow { gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1 }
+            .collect { last ->
+                if (items.size >= 30 && last >= items.lastIndex - 8 && !endReached && !loading && !loadingMore) {
+                    scope.launch { load(page + 1, true) }
+                }
+            }
+    }
 
     Column(Modifier.fillMaxSize().statusBarsPadding()) {
         Row(
@@ -1447,6 +1509,26 @@ fun CategoryScreenServerV2(
             FilterRowV2("地区", facets.areas, area) { area = it; scope.launch { load(1, false) } }
             FilterRowV2("年份", facets.years, year) { year = it; scope.launch { load(1, false) } }
         }
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 3.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("排序", color = TextDim, fontSize = 9.sp, modifier = Modifier.width(34.dp))
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                item {
+                    FilterChipV2("最新", sort == "new") { sort = "new"; scope.launch { load(1, false) } }
+                }
+                item {
+                    FilterChipV2("评分 ↓", sort == "score") { sort = "score"; scope.launch { load(1, false) } }
+                }
+                item {
+                    FilterChipV2("评分 ↑", sort == "score_asc") { sort = "score_asc"; scope.launch { load(1, false) } }
+                }
+                item {
+                    FilterChipV2("最热", sort == "hot") { sort = "hot"; scope.launch { load(1, false) } }
+                }
+            }
+        }
         if (items.isEmpty() && !loading) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -1458,6 +1540,7 @@ fun CategoryScreenServerV2(
         } else {
             LazyVerticalGrid(
                 columns = GridCells.Fixed(3),
+                state = gridState,
                 contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalArrangement = Arrangement.spacedBy(18.dp),
@@ -1466,19 +1549,11 @@ fun CategoryScreenServerV2(
                 items(items) { item ->
                     PosterCardV2(item, modifier = Modifier.fillMaxWidth(), onClick = { onOpen(item) })
                 }
-            }
-            if (items.size >= 30) {
-                Row(
-                    Modifier.fillMaxWidth().padding(vertical = 9.dp),
-                    horizontalArrangement = Arrangement.Center
-                ) {
-                    TextButton(
-                        onClick = { scope.launch { load(page + 1, true) } },
-                        enabled = !loadingMore
-                    ) {
-                        if (loadingMore) CircularProgressIndicator(Modifier.size(15.dp), color = Accent, strokeWidth = 2.dp)
-                        Spacer(Modifier.width(7.dp))
-                        Text(if (loadingMore) "正在加载…" else "加载更多", color = Accent, fontSize = 11.sp)
+                if (loadingMore) {
+                    item {
+                        Box(Modifier.fillMaxWidth().padding(vertical = 12.dp), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator(Modifier.size(16.dp), color = Accent, strokeWidth = 2.dp)
+                        }
                     }
                 }
             }
@@ -1539,12 +1614,26 @@ private fun PrivateGateV2(onBack: () -> Unit, onUnlock: () -> Unit) {
 // 详情
 // ---------------------------------------------------------------------------
 
+/** 兼容旧记录：以前存的是「线路 3」，新记录存采集站真实来源名。 */
+private fun resumeLineIndex(lines: List<Line>, resumeLine: String): Int {
+    if (lines.isEmpty() || resumeLine.isBlank()) return 0
+    val exact = lines.indexOfFirst { it.from == resumeLine }
+    if (exact >= 0) return exact
+    val byName = lines.indexOfFirst { it.from.contains(resumeLine, true) || resumeLine.contains(it.from, true) }
+    if (byName >= 0) return byName
+    val n = Regex("""线路\s*(\d+)""").find(resumeLine)?.groupValues?.getOrNull(1)?.toIntOrNull()
+    return if (n != null && n in 1..lines.size) n - 1 else 0
+}
+
 @Composable
 fun DetailScreenV2(
     item: Item,
     onBack: () -> Unit,
-    onPlay: (List<Line>, Int, Line) -> Unit,
-    resumeEp: Int = 0
+    onPlay: (List<Line>, Int, Line, Long) -> Unit,
+    resumeEp: Int = 0,
+    resumeLine: String = "",
+    resumePositionMs: Long = 0L,
+    autoPlay: Boolean = false
 ) {
     var detail by remember(item.sid, item.id) { mutableStateOf<Detail?>(null) }
     var loading by remember(item.sid, item.id) { mutableStateOf(true) }
@@ -1555,6 +1644,7 @@ fun DetailScreenV2(
     var showAllEpisodes by remember(item.sid, item.id) { mutableStateOf(false) }
     var descOpen by remember(item.sid, item.id) { mutableStateOf(false) }
     var favorite by remember(item.sid, item.id) { mutableStateOf(Library.isFavorite(item)) }
+    var autoPlayed by remember(item.sid, item.id) { mutableStateOf(false) }
 
     LaunchedEffect(item.sid, item.id, reloadTick) {
         loading = true
@@ -1569,8 +1659,9 @@ fun DetailScreenV2(
             }
         } catch (e: Exception) { null }
         if (detail?.lines.isNullOrEmpty()) loadError = "线路加载失败，检查网络后重试"
-        selectedLine = 0
-        selectedEp = resumeEp.coerceIn(0, maxOf(0, (detail?.lines?.firstOrNull()?.eps?.size ?: 1) - 1))
+        selectedLine = resumeLineIndex(detail?.lines.orEmpty(), resumeLine)
+        val lineSize = detail?.lines?.getOrNull(selectedLine)?.eps?.size ?: 1
+        selectedEp = resumeEp.coerceIn(0, maxOf(0, lineSize - 1))
         loading = false
     }
 
@@ -1580,6 +1671,17 @@ fun DetailScreenV2(
     val maxEpisodes = lines.maxOfOrNull { it.eps.size } ?: 0
     val sourceCount = lines.map { it.from }.distinct().count()
     val visibleEpisodes = if (showAllEpisodes) episodes else episodes.take(60)
+    val resumeLineIdx = resumeLineIndex(lines, resumeLine)
+
+    // 从「最近观看」点进来时直接续播：线路和集数已经由入口带进来，不再让用户手点一次。
+    LaunchedEffect(item.sid, item.id, loading, detail, autoPlay) {
+        if (autoPlay && !autoPlayed && !loading && line != null && episodes.isNotEmpty()) {
+            autoPlayed = true
+            val idx = selectedEp.coerceIn(0, episodes.lastIndex)
+            val start = if (idx == resumeEp) resumePositionMs else 0L
+            onPlay(lines, idx, line, start)
+        }
+    }
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 35.dp)) {
         item {
@@ -1643,7 +1745,7 @@ fun DetailScreenV2(
                     )
                     Spacer(Modifier.height(5.dp))
                     Text(
-                        listOf(item.year, item.type, item.area).filter { it.isNotBlank() }.joinToString("  ·  "),
+                        listOf(item.year, item.type, item.area, item.lang).filter { it.isNotBlank() }.joinToString("  ·  "),
                         color = TextSub,
                         fontSize = 10.sp
                     )
@@ -1698,7 +1800,10 @@ fun DetailScreenV2(
                                 if (episodes.isNotEmpty()) {
                                     val playIdx = selectedEp.coerceIn(0, episodes.lastIndex)
                                     selectedEp = playIdx
-                                    onPlay(lines, playIdx, line!!)
+                                    val start = if (playIdx == resumeEp && selectedLine == resumeLineIdx) {
+                                        resumePositionMs
+                                    } else 0L
+                                    onPlay(lines, playIdx, line!!, start)
                                 }
                             }
                             .padding(vertical = 13.dp),
@@ -1759,7 +1864,7 @@ fun DetailScreenV2(
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
-                                    "线路 ${index + 1}",
+                                    lineLangV2(l).ifBlank { "线路 ${index + 1}" },
                                     color = if (selected) AccentSoft else TextMain,
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Medium,
@@ -1820,7 +1925,7 @@ fun DetailScreenV2(
                                         .border(1.dp, if (selected) Accent else Stroke, RoundedCornerShape(8.dp))
                                         .clickable {
                                             selectedEp = idx
-                                            onPlay(lines, idx, line!!)
+                                            onPlay(lines, idx, line!!, 0L)
                                         },
                                     contentAlignment = Alignment.Center
                                 ) {
@@ -1894,12 +1999,40 @@ private fun DetailStatV2(value: String, label: String, modifier: Modifier = Modi
     }
 }
 
+private fun lineLangV2(line: Line): String {
+    val hay = "${line.from} ${line.quality} ${line.eps.firstOrNull()?.name.orEmpty()}".lowercase()
+    return when {
+        hay.contains("粤语") || hay.contains("canto") -> "粤语"
+        hay.contains("国语") || hay.contains("国配") || hay.contains("mandarin") -> "国语"
+        hay.contains("英语") || hay.contains("english") -> "英语"
+        hay.contains("日语") || hay.contains("japanese") -> "日语"
+        hay.contains("韩语") || hay.contains("korean") -> "韩语"
+        else -> ""
+    }
+}
+
+private fun historySubV2(entry: WatchEntry): String {
+    val pct = if (entry.durationMs > 0L) {
+        ((entry.positionMs * 100L / entry.durationMs).coerceIn(0L, 100L)).toInt()
+    } else -1
+    return buildList {
+        if (entry.lineName.isNotBlank()) add(entry.lineName)
+        if (entry.epName.isNotBlank()) add(entry.epName)
+        if (pct >= 0) add("已看 $pct%")
+    }.joinToString(" · ").ifBlank { "继续观看" }
+}
+
 // ---------------------------------------------------------------------------
 // 我的
 // ---------------------------------------------------------------------------
 
 @Composable
-private fun MeScreenV2(onOpen: (Item) -> Unit, onBack: () -> Unit) {
+private fun MeScreenV2(
+    onOpen: (Item) -> Unit,
+    onResume: (WatchEntry) -> Unit,
+    onSources: () -> Unit,
+    onBack: () -> Unit
+) {
     val history = Library.visibleHistory
     val favorites = Library.visibleFavorites
     val update = Repo.update
@@ -1939,7 +2072,7 @@ private fun MeScreenV2(onOpen: (Item) -> Unit, onBack: () -> Unit) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 MeStatV2("${favorites.size}", "收藏", Modifier.weight(1f))
                 MeStatV2("${history.size}", "看过", Modifier.weight(1f))
-                MeStatV2("${if (Repo.serverSourceCount > 0) Repo.serverSourceCount else Repo.sources.size}", "片源", Modifier.weight(1f))
+                MeStatV2("${Repo.sources.size}", "片源", Modifier.weight(1f))
             }
         }
 
@@ -1949,8 +2082,8 @@ private fun MeScreenV2(onOpen: (Item) -> Unit, onBack: () -> Unit) {
         if (history.isEmpty()) {
             item { MeEmptyV2("还没有观看记录", "点开一部片，播放记录会留在这里") }
         } else {
-            items(history.take(3)) { entry ->
-                WatchRowV2(entry.item, entry.lineName + " · " + entry.epName, onOpen)
+            items(history) { entry ->
+                WatchRowV2(entry.item, historySubV2(entry)) { onResume(entry) }
             }
         }
 
@@ -1958,28 +2091,40 @@ private fun MeScreenV2(onOpen: (Item) -> Unit, onBack: () -> Unit) {
         if (favorites.isEmpty()) {
             item { MeEmptyV2("还没有收藏", "在详情页点右上角的心，就会留在这里") }
         } else {
-            items(favorites.take(5)) { item -> WatchRowV2(item, item.type.ifBlank { "收藏" }, onOpen) }
+            items(favorites) { item ->
+                WatchRowV2(item, item.type.ifBlank { "收藏" }) { onOpen(item) }
+            }
         }
 
-        item { SectionTitleV2("播放源", count = if (Repo.serverSourceCount > 0) Repo.serverSourceCount else Repo.sources.size) }
+        item { SectionTitleV2("播放源", count = Repo.sources.size, unit = "个") }
         item {
-            Column(Modifier.padding(horizontal = 20.dp)) {
-                Row(
-                    Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(Modifier.size(6.dp).clip(CircleShape).background(Mint))
-                    Spacer(Modifier.width(9.dp))
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable { onSources() }
+                    .padding(horizontal = 20.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(Modifier.size(6.dp).clip(CircleShape).background(Mint))
+                Spacer(Modifier.width(9.dp))
+                Column(Modifier.weight(1f)) {
                     Text(
-                        "手机直连 ${Repo.sources.size} 个源；电脑在线时自动增强",
-                        color = TextSub,
-                        fontSize = 11.sp,
-                        modifier = Modifier.weight(1f)
+                        "${Repo.sources.size} 个源 · 手机直连片库",
+                        color = TextMain,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium
                     )
-                    Text(if (ServerApi.isOnline()) "家庭增强" else "独立模式", color = Mint, fontSize = 9.sp)
+                    Spacer(Modifier.height(3.dp))
+                    Text(
+                        "内置源只读；自定义源可添加、编辑、测试和删除。",
+                        color = TextDim,
+                        fontSize = 9.sp,
+                        lineHeight = 14.sp
+                    )
                 }
-                Spacer(Modifier.height(4.dp))
-                Text("不依赖电脑；电脑不在线时也能正常搜索、分类和播放。", color = TextDim, fontSize = 9.sp, lineHeight = 14.sp)
+                Spacer(Modifier.width(8.dp))
+                Text("管理", color = AccentSoft, fontSize = 10.sp)
+                Icon(Icons.Outlined.ChevronRight, null, tint = TextDim, modifier = Modifier.size(17.dp))
             }
         }
 
@@ -2153,9 +2298,9 @@ private fun MeEmptyV2(title: String, sub: String) {
 }
 
 @Composable
-private fun WatchRowV2(item: Item, sub: String, onOpen: (Item) -> Unit) {
+private fun WatchRowV2(item: Item, sub: String, onClick: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().clickable { onOpen(item) }.padding(horizontal = 20.dp, vertical = 7.dp),
+        Modifier.fillMaxWidth().clickable { onClick() }.padding(horizontal = 20.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(Modifier.width(48.dp).height(67.dp).clip(RoundedCornerShape(8.dp)).background(CardBg)) {

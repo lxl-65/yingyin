@@ -62,7 +62,19 @@ object Library {
     }
 
     fun record(item: Item, lineName: String, epIdx: Int, epName: String) {
-        val entry = WatchEntry(item, lineName, epIdx, epName, System.currentTimeMillis())
+        val old = history.firstOrNull { norm(it.item.name) == norm(item.name) }
+        // 从“最近观看”回到同一集时，record 不能把已有进度清零；
+        // 换集才从 0 开始，和播放器的 startMs 逻辑保持一致。
+        val keepProgress = old != null && old.epIdx == epIdx
+        val entry = WatchEntry(
+            item,
+            lineName,
+            epIdx,
+            epName,
+            System.currentTimeMillis(),
+            positionMs = if (keepProgress) old!!.positionMs else 0L,
+            durationMs = if (keepProgress) old!!.durationMs else 0L
+        )
         history = (listOf(entry) + history.filterNot { norm(it.item.name) == norm(item.name) })
             .take(30)
         persist()

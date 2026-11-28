@@ -1,6 +1,7 @@
 package app.yingyin.player
 
 import android.content.Context
+import android.content.SharedPreferences
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -17,6 +18,7 @@ import okhttp3.Callback
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
+import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
@@ -31,7 +33,9 @@ data class Source(
     /** 订阅里记录的最近一次响应耗时，数字越小越先参与首屏。 */
     val ms: Int = 0,
     /** 采集站的真实子分类表，格式 "1:movie,2:series,..."；分类页按它一次抓 3 个子类。 */
-    val typeMap: String = ""
+    val typeMap: String = "",
+    /** true = 用户在本机添加的源，可在 App 里编辑/删除；内置源只读。 */
+    val custom: Boolean = false
 ) {
     fun subtypes(cat: String): List<String> {
         if (typeMap.isBlank()) return emptyList()
@@ -43,6 +47,9 @@ data class Source(
 }
 
 data class EntryRef(val s: Int, val id: String, val name: String = "")
+
+/** 测试自定义源的结果：不抛异常，直接把可读结论给界面。 */
+data class SourceTest(val ok: Boolean, val message: String, val ms: Long = 0L)
 
 data class Item(
     val id: String,
@@ -57,7 +64,10 @@ data class Item(
     val srcs: Int = 1,
     val alts: List<Pair<String, String>> = emptyList(),
     /** 网站 /api/list、/api/search 返回的多源条目；有它就走服务器详情。 */
-    val entries: List<EntryRef> = emptyList()
+    val entries: List<EntryRef> = emptyList(),
+    val lang: String = "",
+    /** 合并语种版本时记录 sid:id -> 语种，详情页给线路加“粤语/国语”前缀。 */
+    val altLangs: Map<String, String> = emptyMap()
 )
 
 data class Episode(val name: String, val url: String)
@@ -113,6 +123,54 @@ private const val XJ_BASE = "http://192.168.5.2:8899"
 
 fun norm(s: String): String =
     s.replace(Regex("[\\s·:：!！?？,，.。'’\"“”()（）\\[\\]【】《》\\-—_/\\\\|]"), "").lowercase()
+
+/** 去掉片名末尾的语种版本，用来把「同一部片的粤语/国语/英语版」并成一张卡。 */
+private val LANG_SUFFIX = Regex(
+    "(?i)(?:[\\s·:：\\-—_]*(?:粤语|国语|普通话|英语|英文|日语|韩语|中字|中文字幕|双语|原声|国配|粤配)(?:版|配音|音轨|字幕)?)+\\s*$"
+)
+
+fun baseTitle(name: String): String = name.replace(LANG_SUFFIX, "").trim()
+
+fun langOf(name: String): String = when {
+    Regex("粤语|canto", RegexOption.IGNORE_CASE).containsMatchIn(name) -> "粤语"
+    Regex("国语|国配|mandarin", RegexOption.IGNORE_CASE).containsMatchIn(name) -> "国语"
+    Regex("普通话", RegexOption.IGNORE_CASE).containsMatchIn(name) -> "普通话"
+    Regex("英语|英文|english", RegexOption.IGNORE_CASE).containsMatchIn(name) -> "英语"
+    Regex("日语|japanese", RegexOption.IGNORE_CASE).containsMatchIn(name) -> "日语"
+    Regex("韩语|korean", RegexOption.IGNORE_CASE).containsMatchIn(name) -> "韩语"
+    else -> ""
+}
+
+fun itemKey(item: Item): String = norm(baseTitle(item.name)) + "|" + item.year.take(4)
+
+/**
+ * 列表层把同片不同语种并成一张卡：
+ * 主条目保留原片名，其它语种条目的 sid/id 收进 alts，详情页会一起展开线路。
+ */
+fun groupLanguageVariants(items: List<Item>): List<Item> {
+    val groups = LinkedHashMap<String, MutableList<Item>>()
+    items.forEach { item ->
+        if (item.name.isBlank()) return@forEach
+        groups.getOrPut(itemKey(item)) { mutableListOf() }.add(item)
+    }
+    val out = groups.values.map { group ->
+        val main = group.firstOrNull { baseTitle(it.name) == it.name.trim() } ?: group.first()
+        val extra = group.filter { it !== main }
+            .flatMap { listOf(it.sid to it.id) + it.alts }
+        val extraLangs = group.filter { it !== main }
+            .mapNotNull { v ->
+                val lg = langOf(v.name)
+                if (lg.isBlank()) null else "${v.sid}:${v.id}" to lg
+            }.toMap()
+        main.copy(
+            alts = (main.alts + extra)
+                .filter { it.first.isNotBlank() && it.second.isNotBlank() }
+                .distinct(),
+            altLangs = main.altLangs + extraLangs
+        )
+    }
+    return out
+}
 
 object Cms {
     fun url(api: String, t: String = "", pg: Int = 1, wd: String = "", ids: String = ""): String {
@@ -266,11 +324,20 @@ object Repo {
     private var homeCache: List<Item> = emptyList()
     private var homeCacheAt: Long = 0L
     private var cacheCtx: Context? = null
+    private var sourcePrefs: SharedPreferences? = null
+    private var syncedSources: List<Source>? = null
+
+    /** 本机自定义源；内置 SEED 只读，不会写回订阅。 */
+    var customSources by androidx.compose.runtime.mutableStateOf<List<Source>>(emptyList())
+        private set
 
     /** 启动时读本地缓存，第二次开 App 秒开 */
     fun init(ctx: Context) {
         cacheCtx = ctx.applicationContext
         Library.init(ctx.applicationContext)
+        sourcePrefs = ctx.applicationContext.getSharedPreferences("yingyin_sources", Context.MODE_PRIVATE)
+        loadCustomSources()
+        sources = mergeSources(SEED)
         val sp = ctx.getSharedPreferences("yingyin", Context.MODE_PRIVATE)
         val raw = sp.getString("home", null) ?: return
         homeCacheAt = sp.getLong("homeAt", 0L)
@@ -290,7 +357,7 @@ object Repo {
         if (homeCache.size < 260) homeCacheAt = 0L
     }
 
-    fun cachedHome(): List<Item> = homeCache
+    fun cachedHome(): List<Item> = groupLanguageVariants(homeCache)
 
     private fun saveCache(ctx: Context, items: List<Item>) {
         try {
@@ -373,6 +440,111 @@ object Repo {
         }
     }
 
+    private fun sourceKey(api: String) = api.trim().trimEnd('/').lowercase()
+
+    /** 自定义源排最前；地址去重，避免首页重复请求。 */
+    private fun mergeSources(base: List<Source>): List<Source> {
+        val out = LinkedHashMap<String, Source>()
+        // 用户自己加的源排在最前，方便找到、编辑和删除；同名接口以内置源为准。
+        customSources.forEach { out[sourceKey(it.api)] = it }
+        base.forEach { if (!out.containsKey(sourceKey(it.api))) out[sourceKey(it.api)] = it }
+        return out.values.toList()
+    }
+
+    private fun loadCustomSources() {
+        val raw = sourcePrefs?.getString("custom", "[]") ?: return
+        customSources = try {
+            val arr = JSONArray(raw)
+            (0 until arr.length()).mapNotNull { i ->
+                val j = arr.optJSONObject(i) ?: return@mapNotNull null
+                val api = j.optString("api")
+                if (api.isBlank()) return@mapNotNull null
+                Source(
+                    key = j.optString("key", "c$i"),
+                    name = j.optString("name", "自定义源"),
+                    api = api,
+                    custom = true
+                )
+            }
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun persistCustomSources() {
+        val arr = JSONArray()
+        customSources.forEach { s ->
+            arr.put(JSONObject().apply {
+                put("key", s.key)
+                put("name", s.name)
+                put("api", s.api)
+            })
+        }
+        sourcePrefs?.edit()?.putString("custom", arr.toString())?.apply()
+    }
+
+    private fun refreshSources() {
+        sources = mergeSources(syncedSources ?: SEED)
+        homeCacheAt = 0L
+        synchronized(searchCacheLock) { searchCache.clear() }
+    }
+
+    fun normalizeSourceApi(raw: String): String {
+        var s = raw.trim()
+        if (s.isBlank()) return s
+        if (!s.startsWith("http://") && !s.startsWith("https://")) s = "https://$s"
+        return s
+    }
+
+    /**
+     * 自定义源只做本机保存：内置 SEED 和远程订阅都不会被改写。
+     * key == null 表示新增；返回 null 表示保存成功，否则返回给界面看的错误。
+     */
+    fun saveCustomSource(key: String?, name: String, api: String): String? {
+        val n = name.trim()
+        val a = normalizeSourceApi(api)
+        if (n.isBlank()) return "名字不能为空"
+        if (a.isBlank()) return "接口地址不能为空"
+        val dup = sources.any {
+            it.key != key && sourceKey(it.api) == sourceKey(a)
+        }
+        if (dup) return "这个源已经在列表里了"
+        val newKey = key ?: "c${System.currentTimeMillis()}"
+        val source = Source(newKey, n, a, custom = true)
+        customSources = if (key == null) {
+            customSources + source
+        } else {
+            customSources.map { if (it.key == key) source.copy(key = it.key) else it }
+        }
+        refreshSources()
+        persistCustomSources()
+        return null
+    }
+
+    fun removeCustomSource(key: String) {
+        customSources = customSources.filterNot { it.key == key }
+        refreshSources()
+        persistCustomSources()
+    }
+
+    /** 测试源时只拉第一页；能解析出片名就算通过，不把整站抓下来。 */
+    suspend fun testSource(api: String): SourceTest = withContext(Dispatchers.IO) {
+        val a = normalizeSourceApi(api)
+        if (a.isBlank()) return@withContext SourceTest(false, "接口地址不能为空")
+        val started = System.currentTimeMillis()
+        val raw = text(Cms.url(a, pg = 1))
+        val ms = System.currentTimeMillis() - started
+        if (raw == null) {
+            return@withContext SourceTest(false, "连不上，检查地址、网络或 HTTPS", ms)
+        }
+        val list = Cms.parseList(raw, "test")
+        if (list.isEmpty()) {
+            SourceTest(false, "接口能打开，但没解析到片库；需要 Apple CMS 格式（ac=videolist）", ms)
+        } else {
+            SourceTest(true, "连接成功，第一页 ${list.size} 部", ms)
+        }
+    }
+
     suspend fun sync(urls: List<String>): Boolean = withContext(Dispatchers.IO) {
         for (u in urls) {
             val raw = text(u) ?: continue
@@ -391,7 +563,8 @@ object Repo {
                         ms = if (remote.ms == 0) base?.ms ?: 0 else remote.ms
                     )
                 }
-                sources = merged.values.toList()
+                syncedSources = merged.values.toList()
+                sources = mergeSources(syncedSources!!)
                 synchronized(searchCacheLock) { searchCache.clear() }
                 subState = "远程订阅 · ${sources.size} 个源"
                 homeCacheAt = 0L   // 源变了，首页缓存作废
@@ -438,8 +611,7 @@ object Repo {
         serverSourceCount = n
         serverFeed = ServerApi.list("home", 1)?.items.orEmpty()
         serverHomeReady = true
-        val all = (groups.flatMap { it.items } + serverFeed)
-            .distinctBy { norm(it.name) }
+        val all = groupLanguageVariants(groups.flatMap { it.items } + serverFeed)
             .filter { Library.showPrivate || !isPrivateItem(it) }
         if (all.isNotEmpty()) homeItems = all
         true
@@ -447,7 +619,7 @@ object Repo {
 
     suspend fun home(t: String = "", force: Boolean = false): List<Item> = coroutineScope {
         if (t.isBlank() && !force && homeCache.isNotEmpty() && System.currentTimeMillis() - homeCacheAt < 10 * 60_000L) {
-            val safe = homeCache.filter { Library.showPrivate || !isPrivateItem(it) }
+            val safe = groupLanguageVariants(homeCache).filter { Library.showPrivate || !isPrivateItem(it) }
             homeItems = safe
             return@coroutineScope safe
         }
@@ -686,14 +858,23 @@ object Repo {
     fun merge(all: List<Item>): List<Item> {
         val groups = LinkedHashMap<String, MutableList<Item>>()
         for (one in all) {
-            val k = norm(one.name) + "|" + one.year.take(4)
+            val k = itemKey(one)
             groups.getOrPut(k) { mutableListOf() }.add(one)
         }
         return groups.values.map { list ->
-            val head = list.maxByOrNull { it.score } ?: list.first()
+            val head = list.firstOrNull { baseTitle(it.name) == it.name.trim() }
+                ?: list.maxByOrNull { it.score } ?: list.first()
+            val alts = list.flatMap { listOf(it.sid to it.id) + it.alts }
+                .filter { it.first.isNotBlank() && it.second.isNotBlank() }
+                .distinct()
+            val langs = list.mapNotNull { one ->
+                val lg = langOf(one.name)
+                if (lg.isBlank()) null else "${one.sid}:${one.id}" to lg
+            }.toMap()
             head.copy(
                 srcs = list.map { it.sid }.distinct().size,
-                alts = list.map { it.sid to it.id }
+                alts = alts,
+                altLangs = head.altLangs + langs
             )
         }.sortedWith(compareByDescending<Item> { it.srcs }.thenByDescending { it.score })
     }
@@ -784,21 +965,32 @@ object Repo {
         val xjJob = async(Dispatchers.IO) { if (online) xjLines(item) else emptyList() }
         val byKey = sources.associateBy { it.key }
 
-        val tries = buildList {
-            if (item.sid.isNotBlank() && item.id.isNotBlank()) add(item.sid to item.id)
-            addAll(item.alts)
+        val tries = buildList<Triple<String, String, String>> {
+            if (item.sid.isNotBlank() && item.id.isNotBlank()) {
+                add(Triple(item.sid, item.id, langOf(item.name)))
+            }
+            item.alts.forEach { (sid, id) ->
+                add(Triple(sid, id, item.altLangs["$sid:$id"].orEmpty()))
+            }
             item.entries.forEach { e ->
                 if (e.id.isNotBlank()) {
-                    sources.getOrNull(e.s)?.let { add(it.key to e.id) }
+                    sources.getOrNull(e.s)?.let { add(Triple(it.key, e.id, "")) }
                 }
             }
-        }.filter { it.second.isNotBlank() }.distinct()
+        }.filter { it.second.isNotBlank() }.distinctBy { it.first to it.second }
 
         // 同一部片的多个源同时展开，再合并所有线路——不是只挑一个源的两条线。
-        val direct = tries.mapNotNull { (sid, id) ->
+        val direct = tries.mapNotNull { (sid, id, lang) ->
             val api = byKey[sid]?.api ?: return@mapNotNull null
             async(Dispatchers.IO) {
                 fetch(detailHttp, Cms.url(api, ids = id))?.let { Cms.parseDetail(it, sid) }
+                    ?.let { d ->
+                        if (lang.isBlank()) d else d.copy(
+                            lines = d.lines.map { l ->
+                                if (l.from.startsWith(lang)) l else l.copy(from = "$lang · ${l.from}")
+                            }
+                        )
+                    }
             }
         }.awaitAll().filterNotNull().filter { it.lines.isNotEmpty() }
 

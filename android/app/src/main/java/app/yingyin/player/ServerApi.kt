@@ -103,7 +103,8 @@ object ServerApi {
             area = o.optString("area"),
             score = o.optString("score").toDoubleOrNull() ?: 0.0,
             srcs = refs.size.coerceAtLeast(1),
-            entries = refs
+            entries = refs,
+            lang = o.optString("lang")
         )
     }
 
@@ -155,7 +156,8 @@ object ServerApi {
         page: Int = 1,
         genre: String = "",
         area: String = "",
-        year: String = ""
+        year: String = "",
+        sort: String = ""
     ): ServerPage? {
         if (cat == "private" && !Library.showPrivate) return null
         val q = StringBuilder("/api/list?cat=${URLEncoder.encode(cat, "UTF-8")}&page=$page")
@@ -163,6 +165,7 @@ object ServerApi {
         if (genre.isNotBlank()) q.append("&g=${URLEncoder.encode(genre, "UTF-8")}")
         if (area.isNotBlank()) q.append("&area=${URLEncoder.encode(area, "UTF-8")}")
         if (year.isNotBlank()) q.append("&year=${URLEncoder.encode(year, "UTF-8")}")
+        if (sort.isNotBlank()) q.append("&sort=${URLEncoder.encode(sort, "UTF-8")}")
         val raw = get(q.toString()) ?: return null
         return try {
             val o = JSONObject(raw)
