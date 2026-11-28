@@ -51,6 +51,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -162,6 +163,8 @@ sealed interface AppRouteV2 {
     data object Search : AppRouteV2
     data object Me : AppRouteV2
     data object Sources : AppRouteV2
+    data object History : AppRouteV2
+    data object Favorites : AppRouteV2
     data class Category(val key: String, val title: String) : AppRouteV2
     data class Detail(
         val item: Item,
@@ -246,7 +249,15 @@ fun YingyinAppV2() {
             )
 
             AppRouteV2.Me -> MeScreenV2(
-                onOpen = { go(AppRouteV2.Detail(it)) },
+                onSources = { go(AppRouteV2.Sources) },
+                onHistory = { go(AppRouteV2.History) },
+                onFavorites = { go(AppRouteV2.Favorites) }
+            )
+
+            AppRouteV2.Sources -> SourcesScreenV2(onBack = { back() })
+
+            AppRouteV2.History -> HistoryScreenV2(
+                onBack = { back() },
                 onResume = { entry ->
                     go(AppRouteV2.Detail(
                         entry.item,
@@ -255,12 +266,13 @@ fun YingyinAppV2() {
                         entry.positionMs,
                         autoPlay = true
                     ))
-                },
-                onSources = { go(AppRouteV2.Sources) },
-                onBack = { back() }
+                }
             )
 
-            AppRouteV2.Sources -> SourcesScreenV2(onBack = { back() })
+            AppRouteV2.Favorites -> FavoritesScreenV2(
+                onBack = { back() },
+                onOpen = { go(AppRouteV2.Detail(it)) }
+            )
 
             is AppRouteV2.Category -> {
                 var unlocked by remember(r.key) { mutableStateOf(false) }
@@ -704,27 +716,33 @@ fun HomeScreenV2(
     val serverGroups = Repo.serverGroups
     val sections = remember(items, serverGroups, Repo.serverFeed) {
         if (serverGroups.isNotEmpty()) {
-            buildList {
-                if (Repo.serverFeed.isNotEmpty()) add(HomeSectionV2("home", "最新上线", Repo.serverFeed))
-                addAll(serverGroups.map { HomeSectionV2(it.cat, it.name, it.items) })
-            }
-        } else buildHomeSections(items)
+            // 首页只留一条「最新上线」；电影/电视剧/动漫这些整排分类交给底部「分类」页，
+            // 不再在首页重复占掉两屏。
+            val feed = Repo.serverFeed.ifEmpty { serverGroups.firstOrNull()?.items.orEmpty() }
+            if (feed.isNotEmpty()) listOf(HomeSectionV2("home", "最新上线", feed)) else emptyList()
+        } else if (items.isNotEmpty()) {
+            listOf(HomeSectionV2("home", "最近更新", items.take(30)))
+        } else emptyList()
     }
     val hero = remember(items) { pickHero(items) }
     val history = Library.visibleHistory.firstOrNull()
     val scope = rememberCoroutineScope()
     var syncing by remember { mutableStateOf(false) }
-    var firstLoad by remember { mutableStateOf(true) }
+    var booting by remember { mutableStateOf(items.isEmpty()) }
 
     LaunchedEffect(Unit) {
+        // 有缓存就先出画面；网络刷新放到后台，不再让首页等片源。
+        if (Repo.homeItems.isNotEmpty()) booting = false
         if (Repo.homeItems.isEmpty()) {
-            val serverOk = Repo.loadServerHome()
-            if (!serverOk) Repo.home()
+            // 只显示一次启动骨架，之后即使源全挂也进入空态。
+            booting = true
         }
-        firstLoad = false
+        val serverOk = Repo.loadServerHome()
+        if (!serverOk) Repo.home()
+        booting = false
     }
 
-    if (firstLoad && items.isEmpty()) {
+    if (booting && items.isEmpty()) {
         HomeLoadingV2()
         return
     }
@@ -735,16 +753,20 @@ fun HomeScreenV2(
     ) {
         item { TopBarV2(onSearch, onMe) }
         item {
-            Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 22.dp, bottom = 15.dp)) {
-                Text("今晚，", color = TextMain, fontFamily = Serif, fontSize = 36.sp, fontWeight = FontWeight.Bold, lineHeight = 39.sp)
-                Row(verticalAlignment = Alignment.Bottom) {
-                    Text("看点什么。", color = AccentSoft, fontFamily = Serif, fontSize = 36.sp, fontWeight = FontWeight.Bold, lineHeight = 39.sp)
-                }
-                Spacer(Modifier.height(8.dp))
+            Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 13.dp)) {
+                Text(
+                    "今晚，看点什么。",
+                    color = TextMain,
+                    fontFamily = Serif,
+                    fontSize = 27.sp,
+                    fontWeight = FontWeight.Bold,
+                    lineHeight = 32.sp
+                )
+                Spacer(Modifier.height(5.dp))
                 Text(
                     "${if (Repo.serverSourceCount > 0) Repo.serverSourceCount else Repo.sources.size} 个源已接入 · 先给你最好的线路",
                     color = TextSub,
-                    fontSize = 11.sp,
+                    fontSize = 10.sp,
                     letterSpacing = 0.3.sp
                 )
             }
@@ -752,10 +774,6 @@ fun HomeScreenV2(
 
         hero?.let {
             item { HeroCardV2(it, onOpen = { onOpen(it) }) }
-        }
-
-        item(key = "home-categories") {
-            CategoryChipsV2(onCategory = onCategory)
         }
 
         if (history != null) {
@@ -891,7 +909,7 @@ private fun ContinueCardV2(entry: WatchEntry, onOpen: () -> Unit) {
             Text(entry.item.name, color = TextMain, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Spacer(Modifier.height(5.dp))
             Text(
-                "${entry.lineName} · ${entry.epName}",
+                historySubV2(entry),
                 color = TextSub,
                 fontSize = 10.sp,
                 maxLines = 1,
@@ -1353,6 +1371,12 @@ fun CategoryScreenV2(
     }
 }
 
+private val ALL_GENRES_V2 = listOf(
+    "动作", "爱情", "剧情", "喜剧", "犯罪", "悬疑", "科幻", "奇幻", "恐怖", "惊悚",
+    "冒险", "战争", "历史", "武侠", "灾难", "家庭", "儿童", "古装", "运动", "音乐"
+)
+
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun FilterRowV2(
     label: String,
@@ -1363,14 +1387,21 @@ private fun FilterRowV2(
     if (options.isEmpty()) return
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 3.dp),
-        verticalAlignment = Alignment.CenterVertically
+        verticalAlignment = Alignment.Top
     ) {
-        Text(label, color = TextDim, fontSize = 9.sp, modifier = Modifier.width(34.dp))
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            item {
-                FilterChipV2("全部", selected.isEmpty()) { onSelect("") }
-            }
-            items(options) { option ->
+        Text(
+            label,
+            color = TextDim,
+            fontSize = 9.sp,
+            modifier = Modifier.width(34.dp).padding(top = 8.dp)
+        )
+        FlowRow(
+            modifier = Modifier.weight(1f),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            FilterChipV2("全部", selected.isEmpty()) { onSelect("") }
+            options.forEach { option ->
                 FilterChipV2(option, selected == option) { onSelect(option) }
             }
         }
@@ -1427,6 +1458,16 @@ fun CategoryScreenServerV2(
     suspend fun load(p: Int, append: Boolean) {
         if (append && (loadingMore || loading)) return
         val my = ++loadSeq
+        val cacheKey = Repo.categoryCacheKey(key, genre, area, year, sort)
+        if (!append) {
+            // 先出 5 分钟内的旧页，网络请求在后台继续；用户不再盯着空白网格。
+            Repo.cachedCategory(cacheKey)?.let { hit ->
+                items = groupLanguageVariants(hit.items)
+                facets = hit.facets
+                alive = hit.alive
+                sources = hit.sources
+            }
+        }
         if (append) loadingMore = true else loading = true
         if (!append) endReached = false
         try {
@@ -1442,6 +1483,7 @@ fun CategoryScreenServerV2(
                 facets = res.facets
                 page = p
                 error = null
+                Repo.saveCategory(cacheKey, items, facets, alive, sources)
             } else {
                 // PC 不在线：手机直接按订阅里的 cats 分类拉源，朋友不需要开电脑。
                 val local = Repo.category(cat, p, genre, area, year)
@@ -1460,6 +1502,7 @@ fun CategoryScreenServerV2(
                 }
                 page = p
                 error = if (items.isEmpty()) "这个分类暂时没有加载到内容，换一个分类或稍后重试" else null
+                Repo.saveCategory(cacheKey, items, facets, alive, sources)
             }
         } catch (e: Exception) {
             if (my == loadSeq && !append && items.isEmpty()) error = "分类加载失败，检查网络后重试"
@@ -1471,7 +1514,16 @@ fun CategoryScreenServerV2(
         }
     }
 
-    LaunchedEffect(key) { load(1, false) }
+    LaunchedEffect(key) {
+        Repo.cachedCategory(Repo.categoryCacheKey(key, genre, area, year, sort))?.let { hit ->
+            items = groupLanguageVariants(hit.items)
+            facets = hit.facets
+            alive = hit.alive
+            sources = hit.sources
+            loading = false
+        }
+        load(1, false)
+    }
 
     // 滑到距底部约 8 张时自动续拉，不把“加载更多”当成用户的活儿。
     LaunchedEffect(gridState, page, loading, loadingMore, endReached, items.size) {
@@ -1505,9 +1557,12 @@ fun CategoryScreenServerV2(
         }
         Spacer(Modifier.height(8.dp))
         if (facets.genres.isNotEmpty() || facets.areas.isNotEmpty() || facets.years.isNotEmpty()) {
-            FilterRowV2("类型", facets.genres, genre) { genre = it; scope.launch { load(1, false) } }
-            FilterRowV2("地区", facets.areas, area) { area = it; scope.launch { load(1, false) } }
-            FilterRowV2("年份", facets.years, year) { year = it; scope.launch { load(1, false) } }
+            // 采集站的 facets 偶尔只回前几个；悬疑/科幻/奇幻/儿童这些必须能点到，
+            // 所以用内置全集兜底，再与服务器返回的并集。
+            val genreOptions = (facets.genres + ALL_GENRES_V2).distinct()
+            FilterRowV2("类型", genreOptions, genre) { genre = it; scope.launch { load(1, false) } }
+            FilterRowV2("地区", facets.areas.take(10), area) { area = it; scope.launch { load(1, false) } }
+            FilterRowV2("年份", facets.years.take(10), year) { year = it; scope.launch { load(1, false) } }
         }
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 3.dp),
@@ -1635,8 +1690,9 @@ fun DetailScreenV2(
     resumePositionMs: Long = 0L,
     autoPlay: Boolean = false
 ) {
-    var detail by remember(item.sid, item.id) { mutableStateOf<Detail?>(null) }
-    var loading by remember(item.sid, item.id) { mutableStateOf(true) }
+    val cached = remember(item.sid, item.id) { Repo.cachedDetail(item) }
+    var detail by remember(item.sid, item.id) { mutableStateOf(cached) }
+    var loading by remember(item.sid, item.id) { mutableStateOf(cached == null) }
     var loadError by remember(item.sid, item.id) { mutableStateOf<String?>(null) }
     var reloadTick by remember(item.sid, item.id) { mutableStateOf(0) }
     var selectedLine by remember(item.sid, item.id) { mutableStateOf(0) }
@@ -1647,33 +1703,47 @@ fun DetailScreenV2(
     var autoPlayed by remember(item.sid, item.id) { mutableStateOf(false) }
 
     LaunchedEffect(item.sid, item.id, reloadTick) {
-        loading = true
+        val hadDetail = detail != null
+        if (!hadDetail) loading = true
         loadError = null
-        detail = null
         val online = try { ServerApi.probe() } catch (e: Exception) { false }
-        detail = try {
+        val fresh = try {
             if (online && item.entries.isNotEmpty()) {
                 ServerApi.detail(item)?.takeIf { it.lines.isNotEmpty() } ?: Repo.detail(item)
             } else {
                 Repo.detail(item)
             }
         } catch (e: Exception) { null }
-        if (detail?.lines.isNullOrEmpty()) loadError = "线路加载失败，检查网络后重试"
-        selectedLine = resumeLineIndex(detail?.lines.orEmpty(), resumeLine)
-        val lineSize = detail?.lines?.getOrNull(selectedLine)?.eps?.size ?: 1
-        selectedEp = resumeEp.coerceIn(0, maxOf(0, lineSize - 1))
+        if (fresh != null && fresh.lines.isNotEmpty()) {
+            detail = fresh
+            Repo.saveDetail(item, fresh)
+            selectedLine = resumeLineIndex(fresh.lines, resumeLine)
+            selectedEp = resumeEp.coerceIn(0, maxOf(0, (fresh.lines.getOrNull(selectedLine)?.eps?.size ?: 1) - 1))
+            loadError = null
+        } else if (!hadDetail) {
+            loadError = "线路加载失败，检查网络后重试"
+        }
         loading = false
     }
 
+    val shown = detail?.item ?: item
     val lines = detail?.lines.orEmpty()
     val line = lines.getOrNull(selectedLine)
     val episodes = line?.eps.orEmpty()
     val maxEpisodes = lines.maxOfOrNull { it.eps.size } ?: 0
-    val sourceCount = lines.map { it.from }.distinct().count()
+    val has4k = lines.any { it.from.contains("4K", true) || it.quality.contains("4K", true) }
+    val score = shown.score
+    val metaParts = buildList {
+        shown.year.take(4).takeIf { it.length == 4 }?.let(::add)
+        shown.area.takeIf { it.isNotBlank() }?.let(::add)
+        shown.type.split(',', '，', '/').map { it.trim() }.filter { it.isNotBlank() }
+            .distinct().take(3).forEach(::add)
+        (detail?.lang ?: shown.lang).takeIf { it.isNotBlank() }?.let(::add)
+    }
+    val meta = metaParts.joinToString(" · ")
     val visibleEpisodes = if (showAllEpisodes) episodes else episodes.take(60)
-    val resumeLineIdx = resumeLineIndex(lines, resumeLine)
 
-    // 从「最近观看」点进来时直接续播：线路和集数已经由入口带进来，不再让用户手点一次。
+    // 从「最近观看」点进来时直接续播；缓存里的线路也可立即起播，不再等 8 秒汇总。
     LaunchedEffect(item.sid, item.id, loading, detail, autoPlay) {
         if (autoPlay && !autoPlayed && !loading && line != null && episodes.isNotEmpty()) {
             autoPlayed = true
@@ -1683,22 +1753,23 @@ fun DetailScreenV2(
         }
     }
 
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 35.dp)) {
-        item {
-            Box(Modifier.fillMaxWidth().height(310.dp)) {
-                CoverImage(
-                    url = item.pic,
-                    name = item.name,
-                    modifier = Modifier.fillMaxSize(),
-                    fallbackSize = 64
-                )
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 40.dp)) {
+        item(key = "detail-head") {
+            Box(Modifier.fillMaxWidth().height(292.dp)) {
+                if (shown.pic.isNotBlank()) {
+                    CoverImage(
+                        url = shown.pic,
+                        name = shown.name,
+                        modifier = Modifier.fillMaxSize().alpha(0.26f),
+                        fallbackSize = 54
+                    )
+                }
                 Box(
                     Modifier.matchParentSize().background(
                         Brush.verticalGradient(
-                            0f to Color.Black.copy(alpha = 0.12f),
-                            0.38f to Color.Black.copy(alpha = 0.16f),
-                            0.70f to Color.Black.copy(alpha = 0.62f),
-                            0.88f to Bg.copy(alpha = 0.94f),
+                            0f to Bg.copy(alpha = 0.12f),
+                            0.42f to Bg.copy(alpha = 0.30f),
+                            0.72f to Bg.copy(alpha = 0.86f),
                             1f to Bg
                         )
                     )
@@ -1718,260 +1789,340 @@ fun DetailScreenV2(
                         }
                     )
                 }
-                Column(Modifier.align(Alignment.BottomStart).padding(start = 20.dp, end = 20.dp, bottom = 18.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        BadgeV2(if (lines.any { it.from.contains("4K", true) }) "4K 可选" else "高清")
-                        Spacer(Modifier.width(7.dp))
-                        Text(
-                            when {
-                                loading -> "线路同步中…"
-                                sourceCount > 0 -> "$sourceCount 个来源"
-                                else -> "暂无可用来源"
-                            },
-                            color = TextSub,
-                            fontSize = 9.sp
-                        )
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        item.name,
-                        color = TextMain,
-                        fontFamily = Serif,
-                        fontSize = 31.sp,
-                        fontWeight = FontWeight.Bold,
-                        lineHeight = 35.sp,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Spacer(Modifier.height(5.dp))
-                    Text(
-                        listOf(item.year, item.type, item.area, item.lang).filter { it.isNotBlank() }.joinToString("  ·  "),
-                        color = TextSub,
-                        fontSize = 10.sp
-                    )
-                }
-            }
-        }
-
-        item {
-            Column(Modifier.padding(horizontal = 20.dp)) {
-                Spacer(Modifier.height(12.dp))
-                if (loading) {
-                    Row(
-                        Modifier.fillMaxWidth().padding(vertical = 26.dp),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        CircularProgressIndicator(color = Accent, modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                        Spacer(Modifier.width(9.dp))
-                        Text("正在展开线路…", color = TextSub, fontSize = 11.sp)
-                    }
-                } else if (lines.isEmpty()) {
-                    Column(
-                        Modifier.fillMaxWidth().padding(vertical = 24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text("线路没加载出来", color = TextMain, fontFamily = Serif, fontSize = 17.sp)
-                        Spacer(Modifier.height(5.dp))
-                        Text(loadError ?: "检查网络后再试一次", color = TextSub, fontSize = 10.sp)
-                        Spacer(Modifier.height(12.dp))
-                        Row(
-                            Modifier
-                                .clip(RoundedCornerShape(50))
-                                .background(Panel)
-                                .border(1.dp, Stroke, RoundedCornerShape(50))
-                                .clickable { reloadTick++ }
-                                .padding(horizontal = 14.dp, vertical = 9.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(Icons.Outlined.Refresh, null, tint = AccentSoft, modifier = Modifier.size(15.dp))
-                            Spacer(Modifier.width(5.dp))
-                            Text("重新加载", color = AccentSoft, fontSize = 11.sp, fontWeight = FontWeight.Medium)
-                        }
-                    }
-                } else {
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = 50.dp)
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(Accent)
-                            .clickable {
-                                if (episodes.isNotEmpty()) {
-                                    val playIdx = selectedEp.coerceIn(0, episodes.lastIndex)
-                                    selectedEp = playIdx
-                                    val start = if (playIdx == resumeEp && selectedLine == resumeLineIdx) {
-                                        resumePositionMs
-                                    } else 0L
-                                    onPlay(lines, playIdx, line!!, start)
-                                }
-                            }
-                            .padding(vertical = 13.dp),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(Icons.Outlined.PlayArrow, null, tint = Color(0xFF1B0B05), modifier = Modifier.size(19.dp))
-                        Spacer(Modifier.width(7.dp))
-                        Text(
-                            if (episodes.isNotEmpty()) "立即播放 · ${episodes.getOrNull(selectedEp.coerceIn(0, episodes.lastIndex))?.name ?: "第${selectedEp + 1}集"}" else "立即播放",
-                            color = Color(0xFF1B0B05),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-
-                    Spacer(Modifier.height(12.dp))
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        DetailStatV2("${lines.size}", "线路", Modifier.weight(1f))
-                        DetailStatV2("${sourceCount}", "来源", Modifier.weight(1f))
-                        DetailStatV2(if (maxEpisodes > 0) "$maxEpisodes" else "—", "集数", Modifier.weight(1f))
-                    }
-
-                    Spacer(Modifier.height(22.dp))
-                    Text("线路", color = TextMain, fontFamily = Serif, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-                    Spacer(Modifier.height(3.dp))
-                    Text("点一条线路切换；播放失败会自动换下一条", color = TextDim, fontSize = 9.sp)
-                }
-            }
-        }
-
-        if (lines.isNotEmpty()) {
-            item {
-                LazyRow(
-                    contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 11.dp, bottom = 5.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                Row(
+                    Modifier.align(Alignment.BottomStart).padding(start = 20.dp, end = 20.dp, bottom = 16.dp),
+                    verticalAlignment = Alignment.Bottom
                 ) {
-                    items(lines.size) { index ->
-                        val l = lines[index]
-                        val selected = index == selectedLine
-                        Column(
-                            Modifier
-                                .width(139.dp)
-                                .clip(RoundedCornerShape(11.dp))
-                                .background(if (selected) AccentDark else Panel)
-                                .border(1.dp, if (selected) Accent else Stroke, RoundedCornerShape(11.dp))
-                                .clickable {
-                                    selectedLine = index
-                                    selectedEp = 0
-                                    showAllEpisodes = false
-                                }
-                                .padding(horizontal = 10.dp, vertical = 9.dp)
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        Modifier
+                            .width(112.dp)
+                            .height(166.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(CardBg)
+                            .border(1.dp, Stroke, RoundedCornerShape(14.dp))
+                    ) {
+                        CoverImage(shown.pic, shown.name, Modifier.fillMaxSize(), fallbackSize = 34)
+                        if (shown.remarks.isNotBlank()) {
+                            Box(
+                                Modifier.align(Alignment.BottomStart).fillMaxWidth()
+                                    .background(Brush.verticalGradient(0f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.72f)))
+                                    .padding(horizontal = 8.dp, vertical = 6.dp)
+                            ) {
                                 Text(
-                                    lineLangV2(l).ifBlank { "线路 ${index + 1}" },
-                                    color = if (selected) AccentSoft else TextMain,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Medium,
+                                    shown.remarks.take(14),
+                                    color = TextMain,
+                                    fontSize = 9.sp,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
-                                if (l.from.contains("4K", true) || l.quality.contains("4K", true)) {
-                                    Spacer(Modifier.width(5.dp))
-                                    BadgeV2("4K")
-                                }
                             }
-                            Spacer(Modifier.height(4.dp))
-                            val lineMeta = buildList {
-                                if (l.quality.isNotBlank()) add(l.quality)
-                                if (l.latency > 0) add("${l.latency}ms")
-                                add("${l.eps.size} 集")
-                            }.joinToString(" · ")
+                        }
+                    }
+                    Spacer(Modifier.width(15.dp))
+                    Column(Modifier.weight(1f).padding(bottom = 2.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            BadgeV2(if (has4k) "4K 可选" else if (lines.isNotEmpty()) "高清" else "整理中")
+                            if (score > 0.0) {
+                                Spacer(Modifier.width(7.dp))
+                                Text(
+                                    "★ ${String.format(Locale.US, "%.1f", score)}",
+                                    color = AccentSoft,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            shown.name,
+                            color = TextMain,
+                            fontFamily = Serif,
+                            fontSize = 24.sp,
+                            fontWeight = FontWeight.Bold,
+                            lineHeight = 29.sp,
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Spacer(Modifier.height(7.dp))
+                        if (meta.isNotBlank()) {
                             Text(
-                                lineMeta,
-                                color = if (selected) AccentSoft.copy(alpha = 0.8f) else TextDim,
-                                fontSize = 8.sp,
-                                maxLines = 1,
+                                meta,
+                                color = TextSub,
+                                fontSize = 10.sp,
+                                lineHeight = 15.sp,
+                                maxLines = 2,
                                 overflow = TextOverflow.Ellipsis
                             )
                         }
+                        Spacer(Modifier.height(7.dp))
+                        Text(
+                            if (lines.isNotEmpty()) "${lines.size} 条线路 · ${maxEpisodes} 集" else "线路整理中",
+                            color = TextDim,
+                            fontSize = 9.sp
+                        )
                     }
                 }
             }
+        }
 
-            item {
-                Column(Modifier.padding(horizontal = 20.dp, vertical = 10.dp)) {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text("选集", color = TextMain, fontFamily = Serif, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-                        Spacer(Modifier.width(7.dp))
-                        Text("${episodes.size} 集", color = TextDim, fontSize = 9.sp)
-                        Spacer(Modifier.weight(1f))
-                        if (episodes.size > 60) {
+        item(key = "detail-body") {
+            Column(Modifier.padding(horizontal = 20.dp)) {
+                val d = detail
+                if (d == null) {
+                    Spacer(Modifier.height(10.dp))
+                    DetailLoadingCardV2(loading, loadError) { reloadTick++ }
+                } else {
+                    val dLines = d.lines
+                    val lineIdx = selectedLine.coerceIn(0, maxOf(0, dLines.lastIndex))
+                    val currentLine = dLines.getOrNull(lineIdx)
+                    val eps = currentLine?.eps.orEmpty()
+                    val playIdx = selectedEp.coerceIn(0, maxOf(0, eps.lastIndex))
+                    val lineResumeIdx = resumeLineIndex(dLines, resumeLine)
+                    val playStart = if (lineIdx == lineResumeIdx && playIdx == resumeEp) resumePositionMs else 0L
+
+                    if (currentLine != null && eps.isNotEmpty()) {
+                        Box(
+                            Modifier.fillMaxWidth().height(48.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(Accent)
+                                .clickable { onPlay(dLines, playIdx, currentLine, playStart) },
+                            contentAlignment = Alignment.Center
+                        ) {
                             Text(
-                                if (showAllEpisodes) "收起" else "展开全部",
-                                color = AccentSoft,
-                                fontSize = 10.sp,
-                                modifier = Modifier.clickable { showAllEpisodes = !showAllEpisodes }
+                                "▶  立即播放 · ${episodeChipLabel(eps.getOrNull(playIdx)?.name ?: "第${playIdx + 1}集")}",
+                                color = Color(0xFF1A0D08),
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
                             )
                         }
+                        Spacer(Modifier.height(13.dp))
                     }
-                    Spacer(Modifier.height(11.dp))
-                    visibleEpisodes.chunked(4).forEachIndexed { rowIdx, row ->
-                        Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                            row.forEachIndexed { i, ep ->
-                                val idx = rowIdx * 4 + i
-                                val selected = idx == selectedEp
-                                Box(
-                                    Modifier
-                                        .weight(1f)
-                                        .height(39.dp)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(if (selected) AccentDark else Panel)
-                                        .border(1.dp, if (selected) Accent else Stroke, RoundedCornerShape(8.dp))
-                                        .clickable {
-                                            selectedEp = idx
-                                            onPlay(lines, idx, line!!, 0L)
-                                        },
-                                    contentAlignment = Alignment.Center
-                                ) {
+
+                    if (d.desc.isNotBlank()) {
+                        Column(
+                            Modifier.fillMaxWidth()
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(Panel)
+                                .border(1.dp, Stroke.copy(alpha = 0.7f), RoundedCornerShape(14.dp))
+                                .padding(14.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("简介", color = TextMain, fontFamily = Serif, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                                Spacer(Modifier.weight(1f))
+                                if (d.desc.length > 90) {
                                     Text(
-                                        episodeChipLabel(ep.name),
-                                        color = if (selected) AccentSoft else TextSub,
+                                        if (descOpen) "收起" else "展开",
+                                        color = AccentSoft,
                                         fontSize = 10.sp,
+                                        modifier = Modifier.clickable { descOpen = !descOpen }
+                                    )
+                                }
+                            }
+                            Spacer(Modifier.height(7.dp))
+                            Text(
+                                d.desc,
+                                color = TextSub,
+                                fontSize = 11.sp,
+                                lineHeight = 18.sp,
+                                maxLines = if (descOpen) Int.MAX_VALUE else 4,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Spacer(Modifier.height(12.dp))
+                    }
+
+                    val infoRows = buildList {
+                        shown.year.take(4).takeIf { it.length == 4 }?.let { add("年份" to it) }
+                        shown.area.takeIf { it.isNotBlank() }?.let { add("地区" to it) }
+                        shown.type.takeIf { it.isNotBlank() }?.let { add("类型" to it) }
+                        (detail?.lang ?: shown.lang).takeIf { it.isNotBlank() }?.let { add("语言" to it) }
+                        detail?.director?.takeIf { it.isNotBlank() }?.let { add("导演" to it) }
+                        detail?.actors?.takeIf { it.isNotBlank() }?.let { add("主演" to it) }
+                    }
+                    if (infoRows.isNotEmpty()) {
+                        Column(
+                            Modifier.fillMaxWidth()
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(Panel)
+                                .border(1.dp, Stroke.copy(alpha = 0.7f), RoundedCornerShape(14.dp))
+                                .padding(horizontal = 14.dp, vertical = 4.dp)
+                        ) {
+                            infoRows.forEachIndexed { i, (k, v) ->
+                                Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.Top) {
+                                    Text(k, color = TextDim, fontSize = 10.sp, modifier = Modifier.width(44.dp))
+                                    Text(
+                                        v,
+                                        color = TextSub,
+                                        fontSize = 10.5.sp,
+                                        lineHeight = 16.sp,
+                                        maxLines = if (k == "主演") 3 else 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                                if (i < infoRows.lastIndex) {
+                                    Box(Modifier.fillMaxWidth().height(1.dp).background(Stroke.copy(alpha = 0.45f)))
+                                }
+                            }
+                        }
+                    }
+
+                    if (dLines.isEmpty()) {
+                        Spacer(Modifier.height(12.dp))
+                        DetailLoadingCardV2(false, "这部暂时没有可用线路，换一部或稍后重试", onRetry = { reloadTick++ })
+                    } else {
+                        Row(
+                            Modifier.fillMaxWidth().padding(top = 18.dp, bottom = 10.dp),
+                            verticalAlignment = Alignment.Bottom
+                        ) {
+                            Text("播放线路", color = TextMain, fontFamily = Serif, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+                            Spacer(Modifier.width(7.dp))
+                            Text("${dLines.size} 条", color = TextDim, fontSize = 9.sp, modifier = Modifier.padding(bottom = 2.dp))
+                        }
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                            items(dLines.size) { idx ->
+                                val l = dLines[idx]
+                                val active = idx == lineIdx
+                                Column(
+                                    Modifier
+                                        .width(132.dp)
+                                        .clip(RoundedCornerShape(11.dp))
+                                        .background(if (active) AccentDark else Panel)
+                                        .border(1.dp, if (active) Accent.copy(alpha = 0.55f) else Stroke.copy(alpha = 0.75f), RoundedCornerShape(11.dp))
+                                        .clickable {
+                                            selectedLine = idx
+                                            selectedEp = if (idx == lineResumeIdx) {
+                                                resumeEp.coerceIn(0, maxOf(0, l.eps.lastIndex))
+                                            } else 0
+                                        }
+                                        .padding(horizontal = 11.dp, vertical = 10.dp)
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            lineLangV2(l).ifBlank { "线路 ${idx + 1}" },
+                                            color = if (active) AccentSoft else TextMain,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        if (l.from.contains("4K", true) || l.quality.contains("4K", true)) {
+                                            Spacer(Modifier.width(5.dp))
+                                            BadgeV2("4K")
+                                        }
+                                    }
+                                    Spacer(Modifier.height(5.dp))
+                                    val lineMeta = buildList {
+                                        l.quality.substringBefore("·").trim()
+                                            .takeIf { it.isNotBlank() && it.length <= 10 && !it.contains("未测") }
+                                            ?.let(::add)
+                                        add("${l.eps.size} 集")
+                                    }.joinToString(" · ")
+                                    Text(
+                                        lineMeta,
+                                        color = if (active) AccentSoft.copy(alpha = 0.8f) else TextDim,
+                                        fontSize = 8.sp,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
                                 }
                             }
-                            repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
+                        }
+
+                        Row(
+                            Modifier.fillMaxWidth().padding(top = 18.dp, bottom = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("选集", color = TextMain, fontFamily = Serif, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+                            Spacer(Modifier.width(7.dp))
+                            Text("${eps.size} 集", color = TextDim, fontSize = 9.sp)
+                            Spacer(Modifier.weight(1f))
+                            if (eps.size > 60) {
+                                Text(
+                                    if (showAllEpisodes) "收起" else "展开全部",
+                                    color = AccentSoft,
+                                    fontSize = 10.sp,
+                                    modifier = Modifier.clickable { showAllEpisodes = !showAllEpisodes }
+                                )
+                            }
+                        }
+                        if (eps.isEmpty()) {
+                            Text("这条线路暂时没有选集，换一条线路试试", color = TextDim, fontSize = 10.sp)
+                        } else {
+                            visibleEpisodes.chunked(4).forEachIndexed { rowIdx, row ->
+                                Row(
+                                    Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(7.dp)
+                                ) {
+                                    row.forEachIndexed { i, ep ->
+                                        val idx = rowIdx * 4 + i
+                                        val selected = idx == playIdx
+                                        Box(
+                                            Modifier
+                                                .weight(1f)
+                                                .height(39.dp)
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(if (selected) AccentDark else Panel)
+                                                .border(1.dp, if (selected) Accent else Stroke, RoundedCornerShape(8.dp))
+                                                .clickable {
+                                                    selectedEp = idx
+                                                    onPlay(dLines, idx, currentLine!!, if (idx == resumeEp) resumePositionMs else 0L)
+                                                },
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                episodeChipLabel(ep.name),
+                                                color = if (selected) AccentSoft else TextSub,
+                                                fontSize = 10.sp,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    }
+                                    repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
+                                }
+                            }
                         }
                     }
                 }
             }
+        }
+    }
+}
 
-            item {
-                Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
-                    Text("简介", color = TextMain, fontFamily = Serif, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-                    Spacer(Modifier.height(7.dp))
-                    val desc = detail?.desc.orEmpty().ifBlank { "暂无简介" }
-                    Text(
-                        desc,
-                        color = TextSub,
-                        fontSize = 11.sp,
-                        lineHeight = 18.sp,
-                        maxLines = if (descOpen) Int.MAX_VALUE else 3,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    if (desc.length > 80) {
-                        Spacer(Modifier.height(5.dp))
-                        Text(
-                            if (descOpen) "收起" else "展开",
-                            color = AccentSoft,
-                            fontSize = 10.sp,
-                            modifier = Modifier.clickable { descOpen = !descOpen }
-                        )
-                    }
-                    if (!detail?.actors.isNullOrBlank()) {
-                        Spacer(Modifier.height(10.dp))
-                        Text("主演 · ${detail?.actors}", color = TextDim, fontSize = 10.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    }
-                }
-            }
+@Composable
+private fun DetailLoadingCardV2(
+    loading: Boolean,
+    message: String?,
+    onRetry: () -> Unit
+) {
+    Column(
+        Modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(Panel)
+            .border(1.dp, Stroke.copy(alpha = 0.7f), RoundedCornerShape(14.dp))
+            .padding(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        if (loading) {
+            CircularProgressIndicator(
+                Modifier.size(20.dp),
+                color = Accent,
+                strokeWidth = 2.dp
+            )
+            Spacer(Modifier.height(10.dp))
+            Text("正在汇总线路，通常几秒", color = TextSub, fontSize = 10.sp)
+        } else {
+            Text(message ?: "线路加载失败", color = TextSub, fontSize = 11.sp)
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "重新加载",
+                color = AccentSoft,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onRetry).padding(horizontal = 12.dp, vertical = 6.dp)
+            )
         }
     }
 }
@@ -2016,10 +2167,24 @@ private fun historySubV2(entry: WatchEntry): String {
         ((entry.positionMs * 100L / entry.durationMs).coerceIn(0L, 100L)).toInt()
     } else -1
     return buildList {
-        if (entry.lineName.isNotBlank()) add(entry.lineName)
+        if (entry.lineName.isNotBlank()) add(prettyLineNameV2(entry.lineName))
         if (entry.epName.isNotBlank()) add(entry.epName)
         if (pct >= 0) add("已看 $pct%")
     }.joinToString(" · ").ifBlank { "继续观看" }
+}
+
+/** 播放记录里存的是线路域名，列表里别把 jinyingm3u8 这种原始值直接给用户看。 */
+private fun prettyLineNameV2(raw: String): String {
+    val hay = raw.lowercase()
+    return when {
+        hay.contains("粤语") || hay.contains("canto") -> "粤语线路"
+        hay.contains("国语") || hay.contains("国配") || hay.contains("mandarin") -> "国语线路"
+        hay.contains("英语") || hay.contains("english") -> "英语线路"
+        hay.contains("日语") || hay.contains("japanese") -> "日语线路"
+        hay.contains("韩语") || hay.contains("korean") -> "韩语线路"
+        hay.contains("m3u8") || hay.contains("http") || hay.contains(".com") || hay.contains(".net") -> "默认线路"
+        else -> raw
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2028,10 +2193,9 @@ private fun historySubV2(entry: WatchEntry): String {
 
 @Composable
 private fun MeScreenV2(
-    onOpen: (Item) -> Unit,
-    onResume: (WatchEntry) -> Unit,
     onSources: () -> Unit,
-    onBack: () -> Unit
+    onHistory: () -> Unit,
+    onFavorites: () -> Unit
 ) {
     val history = Library.visibleHistory
     val favorites = Library.visibleFavorites
@@ -2078,21 +2242,29 @@ private fun MeScreenV2(
 
         update?.let { up -> item { UpdateCardV2(up) } }
 
-        item { SectionTitleV2("最近观看", count = history.size) }
-        if (history.isEmpty()) {
-            item { MeEmptyV2("还没有观看记录", "点开一部片，播放记录会留在这里") }
-        } else {
-            items(history) { entry ->
-                WatchRowV2(entry.item, historySubV2(entry)) { onResume(entry) }
-            }
-        }
-
-        item { SectionTitleV2("我的收藏", count = favorites.size) }
-        if (favorites.isEmpty()) {
-            item { MeEmptyV2("还没有收藏", "在详情页点右上角的心，就会留在这里") }
-        } else {
-            items(favorites) { item ->
-                WatchRowV2(item, item.type.ifBlank { "收藏" }) { onOpen(item) }
+        item { SectionTitleV2("我的片单") }
+        item {
+            Column(
+                Modifier.fillMaxWidth().padding(horizontal = 20.dp)
+                    .clip(RoundedCornerShape(15.dp))
+                    .background(Panel)
+                    .border(1.dp, Stroke.copy(alpha = 0.7f), RoundedCornerShape(15.dp))
+            ) {
+                MeEntryRowV2(
+                    icon = Icons.Outlined.PlayArrow,
+                    title = "最近观看",
+                    value = if (history.isEmpty()) "还没有记录" else "${history.size} 部",
+                    hint = if (history.isEmpty()) "点开一部片，播放记录会留在这里" else "点进去选上次看到的位置",
+                    onClick = onHistory
+                )
+                Box(Modifier.fillMaxWidth().height(1.dp).background(Stroke.copy(alpha = 0.5f)))
+                MeEntryRowV2(
+                    icon = Icons.Outlined.FavoriteBorder,
+                    title = "我的收藏",
+                    value = if (favorites.isEmpty()) "还没有收藏" else "${favorites.size} 部",
+                    hint = if (favorites.isEmpty()) "详情页点右上角的心，就会留在这里" else "都在里面，慢慢挑",
+                    onClick = onFavorites
+                )
             }
         }
 
@@ -2159,6 +2331,96 @@ private fun MeScreenV2(
                 Spacer(Modifier.height(4.dp))
                 Text("不登录、不上传、不刷积分", color = TextDim.copy(alpha = 0.7f), fontSize = 9.sp)
             }
+        }
+    }
+}
+
+@Composable
+private fun MeEntryRowV2(
+    icon: ImageVector,
+    title: String,
+    value: String,
+    hint: String,
+    onClick: () -> Unit
+) {
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            Modifier.size(34.dp).clip(RoundedCornerShape(10.dp)).background(Accent.copy(alpha = 0.12f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(icon, null, tint = AccentSoft, modifier = Modifier.size(18.dp))
+        }
+        Spacer(Modifier.width(11.dp))
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(title, color = TextMain, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                Spacer(Modifier.width(7.dp))
+                Text(value, color = TextSub, fontSize = 10.sp)
+            }
+            Spacer(Modifier.height(3.dp))
+            Text(hint, color = TextDim, fontSize = 9.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Icon(Icons.Outlined.ChevronRight, null, tint = TextDim, modifier = Modifier.size(18.dp))
+    }
+}
+
+@Composable
+private fun HistoryScreenV2(
+    onBack: () -> Unit,
+    onResume: (WatchEntry) -> Unit
+) {
+    val history = Library.visibleHistory
+    LazyColumn(
+        Modifier.fillMaxSize().statusBarsPadding(),
+        contentPadding = PaddingValues(bottom = 40.dp)
+    ) {
+        item { SubPageBarV2("最近观看", if (history.isEmpty()) "还没有观看记录" else "${history.size} 部 · 按最近看的排", onBack) }
+        if (history.isEmpty()) {
+            item { MeEmptyV2("还没有观看记录", "点开一部片，播放记录会留在这里") }
+        } else {
+            items(history) { entry ->
+                WatchRowV2(entry.item, historySubV2(entry)) { onResume(entry) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FavoritesScreenV2(
+    onBack: () -> Unit,
+    onOpen: (Item) -> Unit
+) {
+    val favorites = Library.visibleFavorites
+    LazyColumn(
+        Modifier.fillMaxSize().statusBarsPadding(),
+        contentPadding = PaddingValues(bottom = 40.dp)
+    ) {
+        item { SubPageBarV2("我的收藏", if (favorites.isEmpty()) "还没有收藏" else "${favorites.size} 部", onBack) }
+        if (favorites.isEmpty()) {
+            item { MeEmptyV2("还没有收藏", "在详情页点右上角的心，就会留在这里") }
+        } else {
+            items(favorites) { item ->
+                WatchRowV2(item, item.type.ifBlank { "收藏" }) { onOpen(item) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SubPageBarV2(title: String, subtitle: String, onBack: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(start = 14.dp, end = 20.dp, top = 8.dp, bottom = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        RoundIconButtonV2(Icons.Outlined.ArrowBack, "返回", onBack)
+        Spacer(Modifier.width(10.dp))
+        Column {
+            Text(title, color = TextMain, fontFamily = Serif, fontSize = 21.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(2.dp))
+            Text(subtitle, color = TextDim, fontSize = 9.sp)
         }
     }
 }

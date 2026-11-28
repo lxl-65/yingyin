@@ -10,7 +10,7 @@ import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
 /** PC 上的「放映厅」服务。App 优先读它，这样分类、详情、线路和网站完全同源。 */
-const val SERVER_BASE = "http://192.168.5.2:8899"
+const val SERVER_BASE = "http://192.168.5.4:8899"
 
 data class ServerCategory(val key: String, val name: String, val hidden: Boolean)
 data class ServerGroup(val cat: String, val name: String, val items: List<Item>)
@@ -253,11 +253,14 @@ object ServerApi {
                     type = o.optString("type", item.type),
                     remarks = o.optString("remarks", item.remarks),
                     score = o.optString("score").toDoubleOrNull() ?: item.score,
+                    lang = o.optString("lang", item.lang),
                     srcs = o.optJSONArray("sources")?.length() ?: item.srcs
                 ),
                 lines = lines,
-                desc = o.optString("content"),
-                actors = o.optString("actor")
+                desc = cleanText(o.optString("content")),
+                actors = o.optString("actor"),
+                director = o.optString("director"),
+                lang = o.optString("lang", item.lang)
             )
         } catch (_: Exception) {
             null

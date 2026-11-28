@@ -79,7 +79,23 @@ data class Line(
     val bad: Boolean = false,
     val recommended: Boolean = false
 )
-data class Detail(val item: Item, val lines: List<Line>, val desc: String, val actors: String = "")
+data class Detail(
+    val item: Item,
+    val lines: List<Line>,
+    val desc: String,
+    val actors: String = "",
+    val director: String = "",
+    val lang: String = ""
+)
+
+/** 分类页的内存缓存：同一切换条件 5 分钟内先出旧内容，再静默刷新。 */
+data class CategorySnapshot(
+    val items: List<Item>,
+    val facets: ServerFacets,
+    val alive: Int,
+    val sources: Int,
+    val at: Long
+)
 
 data class UpdateInfo(val versionCode: Int, val versionName: String, val apk: String, val notes: String)
 
@@ -224,7 +240,8 @@ object Cms {
                 remarks = j.optString("vod_remarks"),
                 type = j.optString("type_name"),
                 area = j.optString("vod_area"),
-                score = j.optString("vod_score").toDoubleOrNull() ?: 0.0
+                score = j.optString("vod_score").toDoubleOrNull() ?: 0.0,
+                lang = j.optString("vod_lang")
             )
             val froms = j.optString("vod_play_from").split("\$\$\$")
             val urls = j.optString("vod_play_url").split("\$\$\$")
@@ -243,17 +260,36 @@ object Cms {
                     lines.add(Line(froms[k].ifBlank { "线路${k + 1}" }, eps))
                 }
             }
-            val desc = j.optString("vod_content").replace(Regex("<[^>]+>"), "").trim()
+            val desc = cleanText(j.optString("vod_content"))
             // 优先把直链 m3u8/mp4 的线路排在前面：很多源的前一条线路是网页播放页，播放器打不开
             val ordered = lines.sortedByDescending { l ->
                 l.eps.count { looksMedia(it.url) }.toFloat() / l.eps.size.coerceAtLeast(1)
             }
-            Detail(item, ordered, desc, j.optString("vod_actor"))
+            Detail(
+                item,
+                ordered,
+                desc,
+                actors = j.optString("vod_actor"),
+                director = j.optString("vod_director"),
+                lang = j.optString("vod_lang")
+            )
         } catch (e: Exception) {
             null
         }
     }
 }
+
+/** 采集站的简介常带 &nbsp; / HTML 标签；正文里别把实体原样丢给用户。 */
+fun cleanText(raw: String): String = raw
+    .replace("&nbsp;", " ")
+    .replace("&amp;", "&")
+    .replace("&quot;", "\"")
+    .replace("&#39;", "'")
+    .replace("&lt;", "<")
+    .replace("&gt;", ">")
+    .replace(Regex("<[^>]+>"), " ")
+    .replace(Regex("\\s+"), " ")
+    .trim()
 
 object Repo {
     private const val HOME_PAGES = 2
@@ -323,6 +359,8 @@ object Repo {
         private set
     private var homeCache: List<Item> = emptyList()
     private var homeCacheAt: Long = 0L
+    private val categoryCache = mutableMapOf<String, CategorySnapshot>()
+    private val detailCache = mutableMapOf<String, Pair<Long, Detail>>()
     private var cacheCtx: Context? = null
     private var sourcePrefs: SharedPreferences? = null
     private var syncedSources: List<Source>? = null
@@ -355,9 +393,45 @@ object Repo {
         } catch (e: Exception) { emptyList() }
         // 旧版本只缓存了每个源第一页（约 100 部），升级后强制刷新一次
         if (homeCache.size < 260) homeCacheAt = 0L
+        // 缓存先上屏：首帧不再等“服务器探测 + 片源汇总”。
+        if (homeCache.isNotEmpty()) {
+            homeItems = groupLanguageVariants(homeCache).filter { Library.showPrivate || !isPrivateItem(it) }
+        }
     }
 
     fun cachedHome(): List<Item> = groupLanguageVariants(homeCache)
+
+    fun categoryCacheKey(cat: String, genre: String, area: String, year: String, sort: String): String =
+        "$cat|$genre|$area|$year|$sort"
+
+    fun cachedCategory(key: String): CategorySnapshot? {
+        val hit = categoryCache[key] ?: return null
+        return if (System.currentTimeMillis() - hit.at < 5 * 60_000L) hit else null
+    }
+
+    fun saveCategory(key: String, items: List<Item>, facets: ServerFacets, alive: Int, sources: Int) {
+        if (items.isEmpty()) return
+        if (categoryCache.size > 24) {
+            val oldest = categoryCache.minByOrNull { it.value.at }?.key
+            if (oldest != null) categoryCache.remove(oldest)
+        }
+        categoryCache[key] = CategorySnapshot(items, facets, alive, sources, System.currentTimeMillis())
+    }
+
+    fun cachedDetail(item: Item): Detail? {
+        val key = "${item.sid}:${item.id}:${item.name}"
+        val hit = detailCache[key] ?: return null
+        return if (System.currentTimeMillis() - hit.first < 10 * 60_000L) hit.second else null
+    }
+
+    fun saveDetail(item: Item, detail: Detail) {
+        if (detail.lines.isEmpty()) return
+        if (detailCache.size > 30) {
+            val oldest = detailCache.minByOrNull { it.value.first }?.key
+            if (oldest != null) detailCache.remove(oldest)
+        }
+        detailCache["${item.sid}:${item.id}:${item.name}"] = System.currentTimeMillis() to detail
+    }
 
     private fun saveCache(ctx: Context, items: List<Item>) {
         try {
@@ -609,11 +683,17 @@ object Repo {
         serverGroups = groups
         serverCategories = cats
         serverSourceCount = n
-        serverFeed = ServerApi.list("home", 1)?.items.orEmpty()
         serverHomeReady = true
-        val all = groupLanguageVariants(groups.flatMap { it.items } + serverFeed)
+        // 先把分组的正文上屏，再补“最新上线”；后者要汇总全部源，不能挡住首屏。
+        val all = groupLanguageVariants(groups.flatMap { it.items })
             .filter { Library.showPrivate || !isPrivateItem(it) }
         if (all.isNotEmpty()) homeItems = all
+        serverFeed = ServerApi.list("home", 1)?.items.orEmpty()
+        if (serverFeed.isNotEmpty()) {
+            val feed = groupLanguageVariants(serverFeed)
+                .filter { Library.showPrivate || !isPrivateItem(it) }
+            if (feed.isNotEmpty()) homeItems = merge(all + feed)
+        }
         true
     }
 
@@ -643,6 +723,8 @@ object Repo {
         }
         jobs.awaitAll()
         homeLoading = false
+        // PC 放映厅已经先返回时，本地旧结果不再覆盖它。
+        if (serverHomeReady) return@coroutineScope homeItems
         val all = merge(acc.toList())
         val merged = all.filter { Library.showPrivate || !isPrivateItem(it) }
         homeItems = merged
@@ -849,9 +931,9 @@ object Repo {
             return t.removeSuffix("片").ifBlank { t }
         }
 
-        val genres = labels(select = { genre(it.type) }).filter { it.isNotBlank() }.distinct().take(16)
-        val areas = labels({ it.area }, split = true).distinct().take(24)
-        val years = items.map { it.year.take(4) }.filter { it.length == 4 }.distinct().sortedDescending().take(24)
+        val genres = labels(select = { genre(it.type) }).filter { it.isNotBlank() }.distinct().take(40)
+        val areas = labels({ it.area }, split = true).distinct().take(40)
+        val years = items.map { it.year.take(4) }.filter { it.length == 4 }.distinct().sortedDescending().take(30)
         return ServerFacets(genres = genres, areas = areas, years = years)
     }
 
@@ -956,7 +1038,9 @@ object Repo {
         if (lines.isEmpty()) return null
         val desc = details.map { it.desc }.maxByOrNull { it.length }.orEmpty()
         val actors = details.map { it.actors }.maxByOrNull { it.length }.orEmpty()
-        return Detail(item, rankLines(lines), desc, actors)
+        val director = details.map { it.director }.maxByOrNull { it.length }.orEmpty()
+        val lang = item.lang.ifBlank { details.map { it.lang }.maxByOrNull { it.length }.orEmpty() }
+        return Detail(item, rankLines(lines), desc, actors, director, lang)
     }
 
     suspend fun detail(item: Item): Detail? = supervisorScope {
