@@ -93,7 +93,7 @@ object ServerApi {
         return Item(
             id = first?.id ?: o.optString("id"),
             sid = first?.s?.toString() ?: "",
-            name = o.optString("title", o.optString("name")),
+            name = o.optString("title").ifBlank { o.optString("name") },
             pic = o.optString("pic").ifBlank {
                 o.optJSONArray("pics")?.optString(0) ?: ""
             },
@@ -209,12 +209,20 @@ object ServerApi {
     }
 
     suspend fun detail(item: Item): Detail? {
-        if (item.entries.isEmpty()) return null
-        val pairs = item.entries.joinToString(",") { "${it.s}:${it.id}" }
+        if (item.entries.isEmpty() && item.alts.isEmpty()) return null
+        // entries 只是主条目；groupLanguageVariants 把粤语/国语版本收进了 alts，
+        // 服务器详情必须一起请求，否则合并后的语种线路会在在线模式下整组消失。
+        val pairs = (item.entries.map { it.s.toString() to it.id } + item.alts)
+            .filter { it.second.isNotBlank() }
+            .distinct()
+            .take(8)
+            .joinToString(",") { "${it.first}:${it.second}" }
         val raw = get("/api/detail?list=${URLEncoder.encode(pairs, "UTF-8")}") ?: return null
         return try {
             val o = JSONObject(raw)
             val arr = o.optJSONArray("lines") ?: return null
+            val firstS = item.entries.firstOrNull()?.s ?: -1
+            val firstId = item.entries.firstOrNull()?.id.orEmpty()
             val lines = buildList {
                 for (i in 0 until arr.length()) {
                     val l = arr.optJSONObject(i) ?: continue
@@ -227,9 +235,16 @@ object ServerApi {
                         }
                     }
                     if (eps.isEmpty()) continue
+                    val srcS = l.optInt("s", -1)
+                    val srcId = l.optString("id")
+                    val lg = item.altLangs["$srcS:$srcId"].orEmpty()
+                        .ifBlank {
+                            if (srcS == firstS && srcId == firstId) item.lang else ""
+                        }
+                    val rawName = l.optString("name", l.optString("srcName"))
                     add(
                         Line(
-                            from = l.optString("name", l.optString("srcName")),
+                            from = if (lg.isNotBlank() && !rawName.startsWith(lg)) "$lg · $rawName" else rawName,
                             eps = eps,
                             quality = l.optString("q"),
                             latency = l.optInt("lat", 0),

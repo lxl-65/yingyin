@@ -387,7 +387,19 @@ object Repo {
                     id = j.optString("id"), sid = j.optString("sid"), name = j.optString("name"),
                     pic = j.optString("pic"), year = j.optString("year"), remarks = j.optString("remarks"),
                     type = j.optString("type"), area = j.optString("area"),
-                    score = j.optDouble("score", 0.0), srcs = j.optInt("srcs", 1)
+                    score = j.optDouble("score", 0.0), srcs = j.optInt("srcs", 1),
+                    lang = j.optString("lang"),
+                    alts = buildList {
+                        val a = j.optJSONArray("alts") ?: org.json.JSONArray()
+                        for (ai in 0 until a.length()) {
+                            val p = a.optJSONArray(ai) ?: continue
+                            add(p.optString(0) to p.optString(1))
+                        }
+                    },
+                    altLangs = buildMap {
+                        val a = j.optJSONObject("altLangs") ?: JSONObject()
+                        a.keys().forEach { k -> put(k, a.optString(k)) }
+                    }
                 )
             }
         } catch (e: Exception) { emptyList() }
@@ -442,6 +454,13 @@ object Repo {
                     put("pic", it.pic); put("year", it.year); put("remarks", it.remarks)
                     put("type", it.type); put("area", it.area)
                     put("score", it.score); put("srcs", it.srcs)
+                    put("lang", it.lang)
+                    put("alts", org.json.JSONArray().apply {
+                        it.alts.forEach { (s, id) -> put(org.json.JSONArray().put(s).put(id)) }
+                    })
+                    put("altLangs", JSONObject().apply {
+                        it.altLangs.forEach { (k, v) -> put(k, v) }
+                    })
                 })
             }
             ctx.getSharedPreferences("yingyin", Context.MODE_PRIVATE).edit()
@@ -954,7 +973,7 @@ object Repo {
                 if (lg.isBlank()) null else "${one.sid}:${one.id}" to lg
             }.toMap()
             head.copy(
-                srcs = list.map { it.sid }.distinct().size,
+                srcs = maxOf(list.map { it.sid }.distinct().size, list.maxOfOrNull { it.srcs } ?: 1),
                 alts = alts,
                 altLangs = head.altLangs + langs
             )

@@ -312,10 +312,19 @@ fun YingyinAppV2() {
                 epIdx = r.epIdx,
                 startMs = r.startMs,
                 onBack = {
-                    // 从播放器返回详情时带回当前集，避免详情页又跳回第 1 集。
-                    stack = stack.dropLast(2) + AppRouteV2.Detail(r.item, r.epIdx)
+                    // 从播放器返回详情时带回当前集，并保留详情页原来的线路和续播位置。
+                    val prev = stack.getOrNull(stack.size - 2) as? AppRouteV2.Detail
+                    val resumePos = if (prev != null && prev.resumeEp == r.epIdx) prev.resumePositionMs else 0L
+                    stack = stack.dropLast(2) + AppRouteV2.Detail(
+                        r.item,
+                        r.epIdx,
+                        prev?.resumeLine.orEmpty(),
+                        resumePos
+                    )
                 },
-                onEpChange = { nextEp ->
+                onEpChange = { nextEp, lineName ->
+                    // 换集必须同步写历史；否则进度是第 2 集的，历史却还记着第 1 集。
+                    Library.record(r.item, lineName, nextEp, "第${nextEp + 1}集")
                     stack = stack.dropLast(1) + AppRouteV2.Play(r.item, r.title, r.lines, nextEp, 0L)
                 },
                 onProgress = { pos, dur -> Library.updateProgress(r.item, pos, dur) }

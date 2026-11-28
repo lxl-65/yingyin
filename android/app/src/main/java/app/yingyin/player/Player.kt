@@ -94,7 +94,7 @@ fun PlayerScreen(
     epIdx: Int,
     startMs: Long = 0L,
     onBack: () -> Unit,
-    onEpChange: (Int) -> Unit = {},
+    onEpChange: (Int, String) -> Unit = { _, _ -> },
     onProgress: (Long, Long) -> Unit = { _, _ -> }
 ) {
     val ctx = LocalContext.current
@@ -110,8 +110,12 @@ fun PlayerScreen(
             .distinctBy { it.url }
             .sortedByDescending { looksMedia(it.url) }
     }
-    var ci by remember { mutableIntStateOf(0) }
-    val maxEp = remember(lines) { lines.maxOfOrNull { it.eps.size } ?: 0 }
+    // 换集必须回到第一条线路；否则上一集停在第 3 条线路时，新集候选变短会永久卡在“没有可播放的集数”。
+    var ci by remember(playingEp) { mutableIntStateOf(0) }
+    val maxEp = remember(lines) {
+        lines.filter { !it.bad }.ifEmpty { lines }.maxOfOrNull { it.eps.size } ?: 0
+    }
+    var resumeAt by remember { mutableLongStateOf(startMs.coerceAtLeast(0L)) }
     var stateText by remember { mutableStateOf("准备中") }
     var errText by remember { mutableStateOf<String?>(null) }
     var switching by remember { mutableStateOf(false) }
@@ -142,6 +146,17 @@ fun PlayerScreen(
 
     BackHandler { onBack() }
 
+    fun nextEpisode() {
+        if (playingEp + 1 >= maxEp) return
+        val next = playingEp + 1
+        val lineName = lines.firstOrNull {
+            it.eps.getOrNull(playingEp)?.url == candidates.getOrNull(ci)?.url
+        }?.from.orEmpty()
+        resumeAt = 0L
+        playingEp = next
+        onEpChange(next, lineName)
+    }
+
     DisposableEffect(Unit) {
         val act = ctx.activityOrNull()
         val old = act?.requestedOrientation
@@ -163,16 +178,21 @@ fun PlayerScreen(
         bufferSince = 0L
         textTrackSel = -1
         audioTrackSel = -1
-        val c = candidates.getOrNull(ci)
+        // 上一集的 TrackSelectionOverride 绑定的是旧 media 的 TrackGroup，必须清掉；
+        // 否则换集后仍强制走上一集选的字幕/音轨，而 UI 显示“自动”。
+        exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon().clearOverrides().build()
+        val c = candidates.getOrNull(ci) ?: candidates.firstOrNull()
         if (c == null) {
             errText = "没有可播放的集数"
             return@LaunchedEffect
         }
         exo.stop()
         exo.setMediaItem(MediaItem.fromUri(c.url))
-        if (startMs > 0L) exo.seekTo(startMs)
+        if (resumeAt > 0L) exo.seekTo(resumeAt)
         exo.prepare()
         exo.playWhenReady = true
+        // 续播位置只用于第一次起播；后续切线路用切换前的播放位置，不能每次都跳回 startMs。
+        resumeAt = 0L
     }
 
     LaunchedEffect(Unit) {
@@ -204,6 +224,7 @@ fun PlayerScreen(
                 if (ci < candidates.lastIndex) {
                     switching = true
                     bufferSince = 0L
+                    resumeAt = exo.currentPosition
                     ci += 1
                     delay(1200)
                     switching = false
@@ -219,6 +240,7 @@ fun PlayerScreen(
                         if (ci < candidates.lastIndex) {
                             switching = true
                             bufferSince = 0L
+                            resumeAt = exo.currentPosition
                             ci += 1
                             delay(800)
                             switching = false
@@ -309,10 +331,7 @@ fun PlayerScreen(
                         modifier = Modifier
                             .clip(RoundedCornerShape(50))
                             .background(Color.White.copy(alpha = 0.14f))
-                            .clickable {
-                                playingEp += 1
-                                onEpChange(playingEp)
-                            }
+                            .clickable { nextEpisode() }
                             .padding(horizontal = 10.dp, vertical = 6.dp)
                     )
                 }
@@ -324,7 +343,10 @@ fun PlayerScreen(
                         .clip(RoundedCornerShape(50))
                         .background(Color.White.copy(alpha = 0.10f))
                         .clickable {
-                            if (candidates.size > 1) ci = (ci + 1) % candidates.size
+                            if (candidates.size > 1) {
+                                resumeAt = exo.currentPosition
+                                ci = (ci + 1) % candidates.size
+                            }
                         }
                         .padding(horizontal = 10.dp, vertical = 6.dp)
                 )
@@ -369,10 +391,7 @@ fun PlayerScreen(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(50))
                                 .background(Color.White.copy(alpha = 0.16f))
-                                .clickable {
-                                    playingEp += 1
-                                    onEpChange(playingEp)
-                                }
+                                .clickable { nextEpisode() }
                                 .padding(horizontal = 12.dp, vertical = 8.dp)
                         )
                     }
@@ -425,10 +444,7 @@ fun PlayerScreen(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(50))
                                 .background(Accent.copy(alpha = 0.18f))
-                                .clickable {
-                                    playingEp += 1
-                                    onEpChange(playingEp)
-                                }
+                                .clickable { nextEpisode() }
                                 .padding(horizontal = 9.dp, vertical = 5.dp)
                         )
                         Spacer(Modifier.width(6.dp))

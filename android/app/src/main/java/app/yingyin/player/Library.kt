@@ -170,6 +170,13 @@ object Library {
         put("area", item.area)
         put("score", item.score)
         put("srcs", item.srcs)
+        put("lang", item.lang)
+        put("alts", JSONArray().apply {
+            item.alts.forEach { (s, id) -> put(JSONArray().put(s).put(id)) }
+        })
+        put("altLangs", JSONObject().apply {
+            item.altLangs.forEach { (k, v) -> put(k, v) }
+        })
         put("entries", JSONArray().apply {
             item.entries.forEach { e ->
                 put(JSONObject().apply {
@@ -192,6 +199,18 @@ object Library {
         area = j.optString("area"),
         score = j.optDouble("score", 0.0),
         srcs = j.optInt("srcs", 1),
+        lang = j.optString("lang"),
+        alts = buildList {
+            val arr = j.optJSONArray("alts") ?: JSONArray()
+            for (i in 0 until arr.length()) {
+                val p = arr.optJSONArray(i) ?: continue
+                add(p.optString(0) to p.optString(1))
+            }
+        },
+        altLangs = buildMap {
+            val o = j.optJSONObject("altLangs") ?: JSONObject()
+            o.keys().forEach { k -> put(k, o.optString(k)) }
+        },
         entries = buildList {
             val arr = j.optJSONArray("entries") ?: JSONArray()
             for (i in 0 until arr.length()) {
